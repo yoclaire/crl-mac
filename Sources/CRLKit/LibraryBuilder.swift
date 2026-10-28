@@ -156,7 +156,8 @@ public final class LibraryBuilder {
             }
         }
         let cap = try db.prepare("UPDATE media SET caption = ? WHERE name = ?")
-        for (name, c) in MediaCatalog.captions(try iso.contents("CRL/MEDIADB/MEDIA.UTL")) { try cap.run(c.caption, name) }
+        for (name, c) in MediaCatalog.captions(try iso.contents("CRL/MEDIADB/MEDIA.UTL"), validOffsets: filIndex) { try cap.run(c, name) }
+        try linkMaps(db)
         let cat = try db.prepare("INSERT INTO categories VALUES (?, ?, ?)"), item = try db.prepare("INSERT INTO category_items VALUES (?, ?, ?)")
         for (k, c) in MediaCatalog.categories(try iso.contents("CRL/MEDIADB/MEDIA.CTG")).enumerated() {
             try cat.run(c.name, "picture", k)
@@ -164,6 +165,59 @@ public final class LibraryBuilder {
         }
         try db.exec("COMMIT")
     }
+
+    /// Maps carry no catalogue links (none in DBS/LNK, none in the text), so they are matched by
+    /// name: the 8-character stem (AFGHANIS.MAP) against article titles. This is an inference, not
+    /// recovered behaviour — see docs/FORMATS.md.
+    func linkMaps(_ db: SQLite) throws {
+        let maps = try db.rows("SELECT name FROM media WHERE kind = 'map'") { $0.string(0)! }
+        func key(_ t: String) -> String {
+            t.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil).uppercased().filter { $0.isLetter }
+        }
+        var titles: [(book: String, num: Int, title: String, key: String)] = []
+        for book in ["encyclopedia", "almanac", "dictionary"] {
+            titles += try db.rows("SELECT num, title FROM entries WHERE book = ? AND continuation = 0 AND length(title) < 40", book) {
+                (book, $0.int(0), $0.string(1)!, key($0.string(1)!))
+            }
+        }
+        var byPrefix: [String: [(book: String, num: Int, title: String, key: String)]] = [:]
+        for t in titles where t.key.count >= 4 { byPrefix[String(t.key.prefix(8)), default: []].append(t) }
+        let link = try db.prepare("INSERT INTO entry_media VALUES (?, ?, ?, NULL, ?)")
+        let cap = try db.prepare("UPDATE media SET caption = ? WHERE name = ?")
+        for m in maps {
+            let raw = (m as NSString).deletingPathExtension.uppercased()
+            let stem = key(Self.mapAliases[raw] ?? raw)
+            let alias = Self.mapAliases[raw] != nil
+            guard let cands = byPrefix[String(stem.prefix(8))]?.filter({ !alias || $0.key == stem || $0.key.hasPrefix(stem) }),
+                  !cands.isEmpty else { continue }
+            // Shortest matching title per book ("Afghanistan" over "Afghanistan War").
+            var best: [String: (num: Int, title: String)] = [:]
+            for c in cands where best[c.book].map({ c.title.count < $0.title.count }) ?? true { best[c.book] = (c.num, c.title) }
+            for (book, b) in best { try link.run(book, b.num, m, 50) }
+            if let caption = best["encyclopedia"]?.title ?? best["almanac"]?.title ?? Self.mapAliases[raw] { try cap.run(caption, m) }
+        }
+    }
+
+    /// Map names that are abbreviations rather than truncations.
+    static let mapAliases: [String: String] = [
+        "MACAU": "Macao", "MALDIVE": "Maldives", "NORKOREA": "Korea, North", "SOUKOREA": "Korea, South",
+        "BOSNHERZ": "Bosnia and Herzegovina", "UK": "United Kingdom", "VATICAN": "Vatican City", "BURKINA": "Burkina Faso",
+        "CAF": "Central African Republic", "EQUAGUIN": "Equatorial Guinea", "GUINBISS": "Guinea-Bissau", "IVORYCOA": "Côte d'Ivoire",
+        "SAOTOMEP": "São Tomé and Príncipe", "SIERRAL": "Sierra Leone", "ANTIBARB": "Antigua and Barbuda", "BRVIRGIS": "British Virgin Islands",
+        "CAYMAN": "Cayman Islands", "DOMREPUB": "Dominican Republic", "NETHANTI": "Netherlands Antilles", "STKITTSN": "Saint Kitts and Nevis",
+        "TURKSCAI": "Turks and Caicos Islands", "FALKISLA": "Falkland Islands", "FRENGUIA": "French Guiana", "KYRGYSTA": "Kyrgyzstan",
+        "FRENPOLY": "French Polynesia", "NMARIANA": "Northern Mariana Islands", "WSAMOA": "Western Samoa", "US": "United States",
+        "ANTARCT": "Antarctica", "UNITEDAE": "United Arab Emirates", "MEMPHIS": "Memphis", "PORTLANM": "Portland",
+        "PORTLANO": "Portland", "STLOUIS": "Saint Louis", "WASHINDC": "Washington, D.C.",
+        "AK": "Alaska", "AL": "Alabama", "AR": "Arkansas", "AZ": "Arizona", "CA": "California", "CO": "Colorado", "CT": "Connecticut",
+        "DE": "Delaware", "FL": "Florida", "GA": "Georgia", "HI": "Hawaii", "IA": "Iowa", "IN": "Indiana", "ID": "Idaho", "IL": "Illinois",
+        "KS": "Kansas", "KY": "Kentucky", "LA": "Louisiana", "MA": "Massachusetts", "MD": "Maryland", "ME": "Maine", "MI": "Michigan",
+        "MN": "Minnesota", "MO": "Missouri", "MS": "Mississippi", "MT": "Montana", "NC": "North Carolina", "ND": "North Dakota",
+        "NE": "Nebraska", "NH": "New Hampshire", "NJ": "New Jersey", "NM": "New Mexico", "NV": "Nevada", "NY": "New York", "OH": "Ohio",
+        "OK": "Oklahoma", "OR": "Oregon", "PA": "Pennsylvania", "RI": "Rhode Island", "SC": "South Carolina", "SD": "South Dakota",
+        "TN": "Tennessee", "TX": "Texas", "UT": "Utah", "VA": "Virginia", "VT": "Vermont", "WA": "Washington", "WI": "Wisconsin",
+        "WV": "West Virginia", "WY": "Wyoming",
+    ]
 
     // MARK: video / music
 
@@ -210,6 +264,11 @@ public final class LibraryBuilder {
             guard let name = Self.safeName(r.id.map(String.init) ?? r.name ?? "") else { continue }
             let opaque = [271, 272, 308, 436, 437, 477, 478, 479, 480, 481].contains(r.id ?? -1)
             try PEResources.png(fromDIB: r.data, keyMagenta: !opaque).write(to: ui.appendingPathComponent("\(name).png"))
+        }
+        let sounds = try dir("ui/sounds")
+        for f in try iso.files(in: "CRL") where f.name.hasSuffix(".WAV") {
+            guard let name = Self.safeName(f.name.lowercased()) else { continue }
+            try iso.read(f, offset: 0, count: f.size).write(to: sounds.appendingPathComponent(name))
         }
         let fonts = try dir("fonts")
         try iso.contents("CRL/CRL_1.TTF").write(to: fonts.appendingPathComponent("CRL_1.TTF"))

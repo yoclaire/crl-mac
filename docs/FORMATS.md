@@ -122,9 +122,15 @@ reject stale/index copies with a length check.
   Pictures and pronunciations of American Heritage Dictionary entries; all 13,455 offsets land on record starts.
 - **LNK** (212 records) — `MID`/`AVI`/`ANI` file → `[(u32 db_code, u32 entry)]`, after a 7-byte pad.
   db codes: 0 = AHD, 2 = Almanac, 4 = Columbia, 7 = Reader's Companion.
-- **UTL** (1,501 records) — picture name → `u32 MEDIA.FIL offset`, caption.
-- **CTG** — gallery categories → lists of 14-byte picture names (34 of the categories parse so far;
-  `@@@_CATG_NAMES` holds the master name list; TODO).
+- **UTL** (1,501 records) — picture name → `u32 MEDIA.FIL offset`, caption. Stale B-tree copies hold
+  garbage after the name; a caption counts only when its offset lands on the record of the same name.
+- **CTG** — gallery categories. Records are `L, 01, chunk, u32 0, name\0, payload`; `chunk` bit 7 =
+  last chunk, low bits = index (`0x80` = single chunk). Payloads concatenate to `u32 count` +
+  `count × char[14]` names (a name may straddle chunks). 56 of the 63 categories in
+  `@@@_CATG_NAMES` reassemble (1,079 pictures); the rest have broken chains (TODO).
+- **Maps**: the 318 `*.MAP` records are referenced by no catalogue file and no article text. The
+  importer links them **by name** (8-character stem vs. article titles, plus an alias table for
+  abbreviations such as `NORKOREA`, `CAF` and state codes); 317 of 318 link. This is inferred, not recovered.
 
 ## Video (`VIDEOS/*.AVI`, `HELP/*.AVI`, `ANIMATE/*.ANI`)
 
@@ -133,3 +139,17 @@ reject stale/index copies with a length check.
 (`h264_videotoolbox` + AAC, ~0.6 s per clip).
 
 `MUSIC/*.MID` is standard MIDI (`AVMIDIPlayer`).
+
+## Reading room UI (`CRL32.EXE` resources)
+
+- Backgrounds: bitmap 271 (room lit), 272 (dim), 308 (Media Library), 477 (splash). Sprites use
+  magenta (255,0,255) as the transparent key; the list icon strip `IDB_MAINLIST` uses pure blue.
+- Room objects: two parallel `CRect` tables (31 hit rectangles, then 31 draw rectangles; the second
+  table has one leading empty rectangle) in the function at decompiled line ~40302 of CRL32.
+  Pass-Over Help strings are RT_STRING 3000–3028 in the same object order. Sprite variants per object
+  are lit / lit-hover / lit-disabled / dim / dim-hover / dim-disabled (see
+  `Sources/CRLApp/Resources/room.json`).
+- `IDB_MAINLIST`: 16×16 icons, 4 columns (closed book, book+, folder, document) × 17 rows
+  (D T A Q E S W H N L, then map, video, sound, music, picture, animation, search).
+- Panel geometry (Subject List, article pane, media combo) was measured from a screenshot of the
+  original running; it is not in the resources.

@@ -5,7 +5,10 @@ public final class Library: @unchecked Sendable {
     public let directory: URL
     let db: SQLite
 
-    public struct Subject: Hashable, Sendable { public let book: String; public let num: Int; public let title: String }
+    public struct Subject: Hashable, Sendable {
+        public let book: String; public let num: Int; public let title: String
+        public init(book: String, num: Int, title: String) { self.book = book; self.num = num; self.title = title }
+    }
     public struct Article: Sendable {
         public let book: String
         public let num: Int
@@ -31,7 +34,9 @@ public final class Library: @unchecked Sendable {
 
     /// Subject List rows for a book (continuation sections of multi-entry articles are hidden).
     public func subjects(book: String) throws -> [Subject] {
-        try db.rows("SELECT num, title FROM entries WHERE book = ? AND continuation = 0 AND title != '' ORDER BY num", book) {
+        // The thesaurus is stored in category order; its list is alphabetical like the others.
+        let order = book == "thesaurus" ? "sort, num" : "num"
+        return try db.rows("SELECT num, title FROM entries WHERE book = ? AND continuation = 0 AND title != '' ORDER BY \(order)", book) {
             Subject(book: book, num: $0.int(0), title: $0.string(1) ?? "")
         }
     }
@@ -56,7 +61,10 @@ public final class Library: @unchecked Sendable {
         return Article(book: book, num: num, title: head.0, parts: parts, media: media)
     }
 
-    public struct Hit: Hashable, Sendable { public let book: String; public let num: Int; public let title: String }
+    public struct Hit: Hashable, Sendable {
+        public let book: String; public let num: Int; public let title: String
+        public init(book: String, num: Int, title: String) { self.book = book; self.num = num; self.title = title }
+    }
 
     /// Full-text search across every book; titles rank first.
     public func search(_ query: String, book: String? = nil, limit: Int = 200) throws -> [Hit] {

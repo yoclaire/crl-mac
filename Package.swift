@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "CRLMac",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v15)],
     products: [
         .library(name: "CRLKit", targets: ["CRLKit"]),
         .executable(name: "crltool", targets: ["crltool"]),
@@ -12,6 +12,6 @@ let package = Package(
     targets: [
         .target(name: "CRLKit", linkerSettings: [.linkedLibrary("sqlite3")]),
         .executableTarget(name: "crltool", dependencies: ["CRLKit"]),
-        .executableTarget(name: "CRLApp", dependencies: ["CRLKit"]),
+        .executableTarget(name: "CRLApp", dependencies: ["CRLKit"], resources: [.copy("Resources/room.json")]),
     ]
 )

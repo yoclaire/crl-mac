@@ -1,0 +1,689 @@
+{
+ "source": "CRL32.EXE FUN near decompiled line 40302 (CRect tables); sprite ids = RT_BITMAP resource ids; magenta = transparent; variant order and tooltips (string table 3000-3028) recovered from CRL32.EXE resources",
+ "background": {
+  "lit": 271,
+  "dim": 272
+ },
+ "objects": [
+  {
+   "name": "camera",
+   "hit": [
+    73,
+    408,
+    124,
+    444
+   ],
+   "draw": [
+    74,
+    407,
+    126,
+    448
+   ],
+   "variants": {
+    "lit": 352,
+    "litHover": 328,
+    "litDisabled": 343,
+    "dim": 362,
+    "dimHover": 372,
+    "dimDisabled": 390
+   },
+   "tip": "Display Associated Pictures"
+  },
+  {
+   "name": "videocam",
+   "hit": [
+    1,
+    409,
+    72,
+    467
+   ],
+   "draw": [
+    0,
+    406,
+    73,
+    468
+   ],
+   "variants": {
+    "lit": 353,
+    "litHover": 334,
+    "litDisabled": 346,
+    "dim": 363,
+    "dimHover": 373,
+    "dimDisabled": 391
+   },
+   "tip": "Play Associated Video"
+  },
+  {
+   "name": "filmstrip",
+   "hit": [
+    135,
+    412,
+    213,
+    453
+   ],
+   "draw": [
+    135,
+    412,
+    212,
+    453
+   ],
+   "variants": {
+    "lit": 354,
+    "litHover": 310,
+    "litDisabled": 336,
+    "dim": 364,
+    "dimHover": 374,
+    "dimDisabled": 392
+   },
+   "tip": "Play Associated Animation"
+  },
+  {
+   "name": "speaker",
+   "hit": [
+    107,
+    331,
+    167,
+    402
+   ],
+   "draw": [
+    108,
+    332,
+    167,
+    416
+   ],
+   "variants": {
+    "lit": 355,
+    "litHover": 329,
+    "litDisabled": 344,
+    "dim": 365,
+    "dimHover": 375,
+    "dimDisabled": 393
+   },
+   "tip": "Hear Pronunciation"
+  },
+  {
+   "name": "trumpet",
+   "hit": [
+    168,
+    380,
+    231,
+    414
+   ],
+   "draw": [
+    124,
+    379,
+    232,
+    426
+   ],
+   "variants": {
+    "lit": 356,
+    "litHover": 323,
+    "litDisabled": 342,
+    "dim": 366,
+    "dimHover": 376,
+    "dimDisabled": 394
+   },
+   "tip": "Play Associated Music"
+  },
+  {
+   "name": "globe",
+   "hit": [
+    1,
+    324,
+    62,
+    401
+   ],
+   "draw": [
+    0,
+    324,
+    65,
+    412
+   ],
+   "variants": {
+    "lit": 357,
+    "litHover": 316,
+    "litDisabled": 338,
+    "dim": 367,
+    "dimHover": 377,
+    "dimDisabled": 395
+   },
+   "tip": "Display Associated Maps"
+  },
+  {
+   "name": "magnifier",
+   "hit": [
+    318,
+    415,
+    380,
+    455
+   ],
+   "draw": [
+    317,
+    412,
+    381,
+    455
+   ],
+   "variants": {
+    "lit": 358,
+    "litHover": 321,
+    "litDisabled": 340,
+    "dim": 368,
+    "dimHover": 378,
+    "dimDisabled": 396
+   },
+   "tip": "Search References"
+  },
+  {
+   "name": "textbook",
+   "hit": [
+    67,
+    318,
+    103,
+    407
+   ],
+   "draw": [
+    66,
+    319,
+    103,
+    423
+   ],
+   "variants": {
+    "lit": 305,
+    "litHover": 332,
+    "litDisabled": 345,
+    "dim": 369,
+    "dimHover": 379,
+    "dimDisabled": 397
+   },
+   "tip": "Display Article Text"
+  },
+  {
+   "name": "glue",
+   "hit": [
+    241,
+    417,
+    298,
+    446
+   ],
+   "draw": [
+    241,
+    417,
+    298,
+    446
+   ],
+   "variants": {
+    "lit": 360,
+    "litDisabled": 339,
+    "litHover": 348,
+    "dim": 370,
+    "dimDisabled": 398,
+    "dimHover": 410
+   },
+   "tip": "Highlighter"
+  },
+  {
+   "name": "eraser",
+   "hit": [
+    426,
+    421,
+    457,
+    453
+   ],
+   "draw": [
+    426,
+    425,
+    458,
+    448
+   ],
+   "variants": {
+    "lit": 361,
+    "litDisabled": 337,
+    "litHover": 349,
+    "dim": 371,
+    "dimDisabled": 399,
+    "dimHover": 411
+   },
+   "tip": "Bookmark"
+  },
+  {
+   "name": "copier",
+   "hit": [
+    463,
+    373,
+    527,
+    409
+   ],
+   "draw": [
+    438,
+    373,
+    545,
+    412
+   ],
+   "variants": {
+    "dimHover": 312,
+    "litHover": 380
+   },
+   "tip": "Copy Item to Clipboard"
+  },
+  {
+   "name": "printer",
+   "hit": [
+    589,
+    387,
+    639,
+    449
+   ],
+   "draw": [
+    583,
+    347,
+    640,
+    459
+   ],
+   "variants": {
+    "lit": 472,
+    "dimHover": 325,
+    "litHover": 381,
+    "litDisabled": 470,
+    "dimDisabled": 471,
+    "dim": 473
+   },
+   "tip": "Print Item"
+  },
+  {
+   "name": "computer",
+   "hit": [
+    532,
+    332,
+    583,
+    407
+   ],
+   "draw": [
+    528,
+    330,
+    605,
+    423
+   ],
+   "variants": {
+    "dimHover": 311,
+    "litHover": 382
+   },
+   "tip": "Application Configuration"
+  },
+  {
+   "name": "quit",
+   "hit": [
+    557,
+    453,
+    611,
+    479
+   ],
+   "draw": [
+    559,
+    454,
+    611,
+    480
+   ],
+   "variants": {
+    "dimHover": 326,
+    "litHover": 383
+   },
+   "tip": "Quit Application"
+  },
+  {
+   "name": "toc",
+   "hit": [
+    287,
+    381,
+    336,
+    411
+   ],
+   "draw": [
+    287,
+    381,
+    338,
+    411
+   ],
+   "variants": {
+    "dimHover": 331,
+    "litHover": 384
+   },
+   "tip": "Display Table of Contents"
+  },
+  {
+   "name": "help",
+   "hit": [
+    528,
+    442,
+    549,
+    477
+   ],
+   "draw": [
+    528,
+    443,
+    549,
+    475
+   ],
+   "variants": {
+    "dimHover": 317,
+    "litHover": 385
+   },
+   "tip": "Text and Video Help"
+  },
+  {
+   "name": "media",
+   "hit": [
+    74,
+    447,
+    145,
+    479
+   ],
+   "draw": [
+    71,
+    441,
+    149,
+    480
+   ],
+   "variants": {
+    "dimHover": 322,
+    "active": 341,
+    "litHover": 386
+   },
+   "tip": "Media Library Items"
+  },
+  {
+   "name": "index",
+   "hit": [
+    365,
+    382,
+    414,
+    409
+   ],
+   "draw": [
+    366,
+    382,
+    415,
+    412
+   ],
+   "variants": {
+    "dimHover": 319,
+    "litHover": 388
+   },
+   "tip": "Reference Index Selection"
+  },
+  {
+   "name": "notepad",
+   "hit": [
+    510,
+    416,
+    570,
+    440
+   ],
+   "draw": [
+    504,
+    408,
+    576,
+    448
+   ],
+   "variants": {
+    "dimHover": 324,
+    "litHover": 389
+   },
+   "tip": "Reference Trails"
+  },
+  {
+   "name": "close",
+   "hit": [
+    615,
+    2,
+    638,
+    16
+   ],
+   "draw": [
+    615,
+    2,
+    638,
+    16
+   ],
+   "variants": {},
+   "tip": "Minimize"
+  },
+  {
+   "name": "sysmenu",
+   "hit": [
+    0,
+    0,
+    26,
+    17
+   ],
+   "draw": [
+    0,
+    0,
+    26,
+    17
+   ],
+   "variants": {},
+   "tip": "Menu"
+  },
+  {
+   "name": "encyclopedia",
+   "hit": [
+    540,
+    24,
+    566,
+    95
+   ],
+   "draw": [
+    541,
+    25,
+    566,
+    98
+   ],
+   "variants": {
+    "lit": 415,
+    "dimHover": 315,
+    "litHover": 400,
+    "dim": 429
+   },
+   "tip": "Encyclopedia"
+  },
+  {
+   "name": "dictionary",
+   "hit": [
+    566,
+    24,
+    593,
+    98
+   ],
+   "draw": [
+    566,
+    26,
+    593,
+    98
+   ],
+   "variants": {
+    "lit": 417,
+    "dimHover": 313,
+    "litHover": 401,
+    "dim": 426
+   },
+   "tip": "American Heritage \u00ae Dictionary"
+  },
+  {
+   "name": "thesaurus",
+   "hit": [
+    594,
+    24,
+    614,
+    95
+   ],
+   "draw": [
+    593,
+    25,
+    615,
+    98
+   ],
+   "variants": {
+    "lit": 420,
+    "dimHover": 333,
+    "litHover": 402,
+    "dim": 434
+   },
+   "tip": "Roget's II"
+  },
+  {
+   "name": "almanac",
+   "hit": [
+    615,
+    26,
+    637,
+    99
+   ],
+   "draw": [
+    615,
+    26,
+    638,
+    99
+   ],
+   "variants": {
+    "lit": 416,
+    "dimHover": 309,
+    "litHover": 403,
+    "dim": 425
+   },
+   "tip": "Information Please \u00ae Almanac"
+  },
+  {
+   "name": "directory",
+   "hit": [
+    540,
+    107,
+    567,
+    181
+   ],
+   "draw": [
+    541,
+    108,
+    567,
+    182
+   ],
+   "variants": {
+    "lit": 422,
+    "dimHover": 314,
+    "litHover": 404,
+    "dim": 427
+   },
+   "tip": "National Directory"
+  },
+  {
+   "name": "legal",
+   "hit": [
+    568,
+    107,
+    604,
+    181
+   ],
+   "draw": [
+    567,
+    108,
+    605,
+    182
+   ],
+   "variants": {
+    "lit": 297,
+    "dimHover": 320,
+    "litHover": 405,
+    "dim": 431
+   },
+   "tip": "Legal Word Book"
+  },
+  {
+   "name": "wallstreet",
+   "hit": [
+    605,
+    107,
+    638,
+    181
+   ],
+   "draw": [
+    605,
+    107,
+    638,
+    182
+   ],
+   "variants": {
+    "lit": 421,
+    "dimHover": 335,
+    "litHover": 406,
+    "dim": 435
+   },
+   "tip": "Wall Street Words"
+  },
+  {
+   "name": "history",
+   "hit": [
+    543,
+    191,
+    561,
+    266
+   ],
+   "draw": [
+    542,
+    192,
+    559,
+    267
+   ],
+   "variants": {
+    "lit": 418,
+    "dimHover": 318,
+    "litHover": 407,
+    "dim": 430
+   },
+   "tip": "American History"
+  },
+  {
+   "name": "style",
+   "hit": [
+    574,
+    192,
+    617,
+    267
+   ],
+   "draw": [
+    574,
+    192,
+    617,
+    267
+   ],
+   "variants": {
+    "lit": 423,
+    "dimHover": 330,
+    "litHover": 408,
+    "dim": 433
+   },
+   "tip": "Written Word III"
+  },
+  {
+   "name": "quotes",
+   "hit": [
+    618,
+    191,
+    639,
+    266
+   ],
+   "draw": [
+    617,
+    192,
+    640,
+    267
+   ],
+   "variants": {
+    "dimHover": 327,
+    "litHover": 409,
+    "lit": 424,
+    "dim": 432
+   },
+   "tip": "Simpson's Contemporary Quotations"
+  }
+ ],
+ "tooltipStrings": "CRL32.EXE RT_STRING 3000-3028"
+}

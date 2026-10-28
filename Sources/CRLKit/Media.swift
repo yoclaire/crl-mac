@@ -148,32 +148,46 @@ public enum MediaCatalog {
         return out
     }
 
-    /// MEDIA.UTL: picture/map name → (MEDIA.FIL offset, caption).
-    public static func captions(_ d: Data) -> [String: (filOffset: Int, caption: String)] {
-        var out: [String: (filOffset: Int, caption: String)] = [:]
+    /// MEDIA.UTL: picture/map name → caption. Stale B-tree copies carry garbage after the name, so a
+    /// caption only counts when its MEDIA.FIL offset points at the record of the same name.
+    public static func captions(_ d: Data, validOffsets: [Int: String]) -> [String: String] {
+        var out: [String: String] = [:]
         namedRecords(d, extensions: ["PIC", "MAP"]) { name, p, _ in
-            guard out[name] == nil, p + 4 < d.count else { return }
-            out[name] = (Int(d.le32(p)), d.cString(p + 4, max: 120))
+            guard out[name] == nil, p + 4 < d.count, validOffsets[Int(d.le32(p))] == name else { return }
+            out[name] = d.cString(p + 4, max: 120)
         }
         return out
     }
 
     /// MEDIA.CTG: gallery category → picture names.
+    /// Records are `L, 01, chunk, u32 0, name\0, payload`; `chunk` bit 7 marks the last chunk and the low
+    /// bits its index. Payloads concatenate to `u32 count` + `count × char[14]` names, and later chunks
+    /// may split a name, so the stream is rebuilt before parsing.
     public static func categories(_ d: Data) -> [(name: String, pictures: [String])] {
-        var out: [(name: String, pictures: [String])] = [], seen = Set<String>()
-        var i = 0
-        while i + 12 < d.count {
+        var chunks: [String: [Int: Data]] = [:], last: [String: Int] = [:], order: [String] = []
+        var i = 1
+        while i + 8 < d.count {
             defer { i += 1 }
-            guard d.u8(i) == 1, d.u8(i + 1) == 0x80, d.le32(i + 2) == 0 else { continue }
+            guard d.u8(i) == 1, d.le32(i + 2) == 0 else { continue }
+            let flag = Int(d.u8(i + 1)), L = Int(d.u8(i - 1))
             let name = d.cString(i + 6, max: 41)
-            guard name.count >= 2, !name.hasPrefix("@"), name.allSatisfy({ $0.isASCII && !$0.isNewline }) else { continue }
-            let p = i + 6 + name.utf8.count + 1
-            guard p + 4 < d.count else { continue }
-            let n = Int(d.le32(p))
-            guard n > 0, n < 2000, p + 4 + 14 * n <= d.count else { continue }
-            let pics = (0..<n).map { d.cString(p + 4 + 14 * $0, max: 14) }
-            guard pics.allSatisfy({ $0.hasSuffix(".PIC") || $0.hasSuffix(".MAP") }), !seen.contains(name) else { continue }
-            seen.insert(name)
+            guard name.count >= 2, !name.hasPrefix("@"), name.allSatisfy({ $0.isASCII && ($0.isLetter || " ./'&-".contains($0)) }) else { continue }
+            let payloadStart = i + 6 + name.utf8.count + 1, end = i - 1 + L + 1
+            guard end > payloadStart, end <= d.count else { continue }
+            let index = flag & 0x7F
+            if chunks[name] == nil { order.append(name) }
+            if chunks[name, default: [:]][index] == nil { chunks[name, default: [:]][index] = d.sub(payloadStart, end - payloadStart) }
+            if flag & 0x80 != 0, last[name] == nil { last[name] = index }
+        }
+        var out: [(name: String, pictures: [String])] = []
+        for name in order {
+            guard let n = last[name], let parts = chunks[name], (0...n).allSatisfy({ parts[$0] != nil }) else { continue }
+            let stream = (0...n).reduce(Data()) { $0 + parts[$1]! }
+            guard stream.count >= 4 else { continue }
+            let count = Int(stream.le32(0))
+            guard count > 0, count < 2000, 4 + 14 * count <= stream.count else { continue }
+            let pics = (0..<count).map { stream.cString(4 + 14 * $0, max: 14) }
+            guard pics.allSatisfy({ $0.hasSuffix(".PIC") || $0.hasSuffix(".MAP") }) else { continue }
             out.append((name, pics))
         }
         return out
