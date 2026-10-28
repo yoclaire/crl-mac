@@ -187,7 +187,7 @@ final class AppModel: ObservableObject {
         let url = library.url(path)
         switch m.kind {
         case "sound": player.playSound(url)
-        case "music": player.playMIDI(url)
+        case "music": player.playMusic(url)
         default: overlay = m; if m.kind == "video" || m.kind == "animation" || m.kind == "help" { player.stop() }
         }
     }
@@ -226,7 +226,7 @@ final class AppModel: ObservableObject {
         mediaItem = m
         guard let path = m.path, let library else { return }
         if m.kind == "sound" { player.playSound(library.url(path)) }
-        if m.kind == "music" { player.playMIDI(library.url(path)) }
+        if m.kind == "music" { player.playMusic(library.url(path)) }
     }
 
     func addBookmark() {
@@ -290,6 +290,11 @@ final class MediaPlayer {
     func playEffect(_ url: URL) {
         effect = try? AVAudioPlayer(contentsOf: url)
         effect?.play()
+    }
+
+    /// The disc's music clips are WAVE recordings; only genuine .mid files go to the MIDI player.
+    func playMusic(_ url: URL) {
+        if url.pathExtension.lowercased() == "mid" { playMIDI(url) } else { playSound(url) }
     }
 
     func playMIDI(_ url: URL) {

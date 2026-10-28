@@ -138,7 +138,8 @@ reject stale/index copies with a length check.
 22.05 kHz. AVFoundation can't decode Indeo 3, so the importer converts each clip once with ffmpeg
 (`h264_videotoolbox` + AAC, ~0.6 s per clip).
 
-`MUSIC/*.MID` is standard MIDI (`AVMIDIPlayer`).
+`MUSIC/*.MID` are **not MIDI**: all 154 are RIFF WAVE recordings (MS-ADPCM, mono 22.05 kHz) with a
+`.MID` name. The importer stores them by content type (`.wav`) and plays them as audio.
 
 ## Reading room UI (`CRL32.EXE` resources)
 
@@ -162,7 +163,7 @@ importer derives names from the disc's own data (`LibraryBuilder.nameAndGroupMed
 | Type | Name | Categories |
 |---|---|---|
 | Pronunciations | the word in their MEDIA.DBS item | A–Z, "#", plus "Unlabelled" for 112 recordings no entry references |
-| Music | first article MEDIA.LNK links it to (repeats numbered) | Instruments (`500xxxx.MID`) / Musical Styles (`60xxx.MID`) |
+| Music (WAVE clips named `.MID`) | first article MEDIA.LNK links it to (repeats numbered) | Instruments (`500xxxx.MID`) / Musical Styles (`60xxx.MID`) |
 | Video, animation | linked article whose title matches the file name, else the first link | one group each |
 | Maps | name-matched article title, or the alias table | 12 regions: MEDIA.FIL stores maps as one alphabetical run per region (region names are ours) |
 | Photos not in any CTG category | — | "Other Pictures" |

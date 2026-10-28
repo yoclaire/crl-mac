@@ -6,7 +6,8 @@ import Foundation
 ///     media/pic/*.jpg     repaired Pegasus JPEGs (photos and maps)
 ///     media/wav/*.wav     MS-ADPCM pronunciations / sounds (played natively)
 ///     media/video/*.mp4   Indeo 3 AVIs/ANIs transcoded with ffmpeg (if available)
-///     media/midi/*.mid
+///     media/music/*        the MUSIC folder's clips: despite the .MID names they are RIFF WAVE
+///                          (MS-ADPCM) recordings, stored under the extension matching their content
 ///     ui/*.png            CRL32.EXE bitmap resources (room artwork), magenta keyed to alpha
 ///     fonts/CRL_1.TTF     pronunciation font from the disc
 public final class LibraryBuilder {
@@ -47,6 +48,8 @@ public final class LibraryBuilder {
             throw CRLError.missing("this disc image is not the Complete Reference Library (no CRL/REFDATA)")
         }
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        // Rebuilding over an old library: clear only the subdirectories this builder owns.
+        for sub in ["media", "ui", "fonts"] { try? FileManager.default.removeItem(at: output.appendingPathComponent(sub)) }
         let dbURL = output.appendingPathComponent("library.sqlite.partial")
         try? FileManager.default.removeItem(at: dbURL)
         let db = try SQLite(path: dbURL.path)
@@ -345,11 +348,15 @@ public final class LibraryBuilder {
     // MARK: video / music
 
     func buildDiscMedia(_ db: SQLite) throws {
-        let midi = try dir("media/midi"), video = try dir("media/video")
+        let music = try dir("media/music"), video = try dir("media/video")
         let ins = try db.prepare("INSERT OR REPLACE INTO media VALUES (?, ?, ?, ?, NULL, NULL)")
         for f in try iso.files(in: "CRL/MUSIC") where f.name.hasSuffix(".MID") && Self.safeName(f.name) != nil {
-            try iso.read(f, offset: 0, count: f.size).write(to: midi.appendingPathComponent(f.name.lowercased()))
-            try ins.run(f.name, "music", "media/midi/\(f.name.lowercased())", nil)
+            let data = try iso.read(f, offset: 0, count: f.size)
+            // The disc names them .MID, but they are WAVE audio; keep real MIDI (MThd) as .mid.
+            let ext = data.prefix(4) == Data("MThd".utf8) ? "mid" : "wav"
+            let file = "\((f.name as NSString).deletingPathExtension.lowercased()).\(ext)"
+            try data.write(to: music.appendingPathComponent(file))
+            try ins.run(f.name, "music", "media/music/\(file)", nil)
         }
         let clips = try [("CRL/VIDEOS", "video"), ("CRL/ANIMATE", "animation"), ("CRL/HELP", "help")].flatMap { path, kind in
             try iso.files(in: path).filter { Self.safeName($0.name) != nil }.map { (path, kind, $0) }

@@ -12,7 +12,7 @@ built app contains the (copyrighted) disc content it is for personal use, not fo
 Ten reference works (American Heritage Dictionary 3rd ed., Concise Columbia Encyclopedia,
 Information Please Almanac, Roget's II, National Directory, Legal Word Book, Wall Street Words,
 Reader's Companion to American History, Written Word III, Simpson's Contemporary Quotations),
-~1,800 photos and maps, ~10,000 spoken pronunciations, 81 videos and animations, 154 MIDI tracks.
+~1,800 photos and maps, ~10,000 spoken pronunciations, 81 videos and animations, 154 music clips.
 
 ## Build and run
 
