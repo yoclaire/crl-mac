@@ -28,6 +28,14 @@ public final class LibraryBuilder {
         return dirs.map { "\($0)/ffmpeg" }.first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
+    /// Every output file name comes from the disc image, so only plain DOS-style names are accepted
+    /// (letters, digits, '_' and '-', optional 1-3 character extension). Anything else is skipped,
+    /// which keeps a crafted image from writing outside the library directory.
+    public static func safeName(_ name: String) -> String? {
+        let ok = name.range(of: #"^[A-Za-z0-9_-]{1,16}(\.[A-Za-z0-9]{1,3})?$"#, options: .regularExpression) != nil
+        return ok ? name : nil
+    }
+
     func dir(_ path: String) throws -> URL {
         let u = output.appendingPathComponent(path)
         try FileManager.default.createDirectory(at: u, withIntermediateDirectories: true)
@@ -110,8 +118,9 @@ public final class LibraryBuilder {
         for (i, r) in records.enumerated() {
             if i % 200 == 0 { progress("Extracting pictures and sounds", 0.4 + 0.3 * Double(i) / Double(records.count)) }
             byOffset[r.offset] = r.name
+            guard let safe = Self.safeName(r.name) else { continue }
             let blob = try iso.read(fil, offset: r.dataOffset, count: r.size)
-            let stem = (r.name as NSString).deletingPathExtension, ext = (r.name as NSString).pathExtension.uppercased()
+            let stem = (safe as NSString).deletingPathExtension, ext = (safe as NSString).pathExtension.uppercased()
             switch ext {
             case "WAV":
                 try blob.write(to: wavs.appendingPathComponent("\(stem).wav"))
@@ -161,12 +170,12 @@ public final class LibraryBuilder {
     func buildDiscMedia(_ db: SQLite) throws {
         let midi = try dir("media/midi"), video = try dir("media/video")
         let ins = try db.prepare("INSERT OR REPLACE INTO media VALUES (?, ?, ?, ?, NULL, NULL)")
-        for f in try iso.files(in: "CRL/MUSIC") where f.name.hasSuffix(".MID") {
+        for f in try iso.files(in: "CRL/MUSIC") where f.name.hasSuffix(".MID") && Self.safeName(f.name) != nil {
             try iso.read(f, offset: 0, count: f.size).write(to: midi.appendingPathComponent(f.name.lowercased()))
             try ins.run(f.name, "music", "media/midi/\(f.name.lowercased())", nil)
         }
         let clips = try [("CRL/VIDEOS", "video"), ("CRL/ANIMATE", "animation"), ("CRL/HELP", "help")].flatMap { path, kind in
-            try iso.files(in: path).map { (path, kind, $0) }
+            try iso.files(in: path).filter { Self.safeName($0.name) != nil }.map { (path, kind, $0) }
         }
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("crl-import-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
@@ -198,7 +207,7 @@ public final class LibraryBuilder {
         let ui = try dir("ui")
         let exe = try iso.contents("CRL/CRL32.EXE")
         for r in try PEResources.resources(exe) where r.type == 2 {
-            let name = r.id.map(String.init) ?? r.name ?? "unknown"
+            guard let name = Self.safeName(r.id.map(String.init) ?? r.name ?? "") else { continue }
             let opaque = [271, 272, 308, 436, 437, 477, 478, 479, 480, 481].contains(r.id ?? -1)
             try PEResources.png(fromDIB: r.data, keyMagenta: !opaque).write(to: ui.appendingPathComponent("\(name).png"))
         }

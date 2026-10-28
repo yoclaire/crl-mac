@@ -43,6 +43,8 @@ do {
         let j = Data([0xFF, 0xD8, 0xFF, 0xE1, 0, 10, 0x50, 0x49, 0x43, 0, 1, 24, 30, 1, 0xFF, 0xDA, 0, 2])
         let r = try MediaFile.repairJPEG(j)
         check(Array(r.prefix(4)) == [0xFF, 0xD8, 0xFF, 0xDB] && r.range(of: Data("PIC".utf8)) == nil && r[6] == 0 && r[7] == 12, "Pegasus JPEG repair")
+        check(LibraryBuilder.safeName("I0110026.PIC") != nil && LibraryBuilder.safeName("../x.png") == nil
+              && LibraryBuilder.safeName("a/b") == nil && LibraryBuilder.safeName("..") == nil, "output names are confined")
     default: usage()
     }
 } catch {
