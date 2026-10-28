@@ -1,0 +1,7 @@
+# Original disc content and anything derived from it stays out of git (copyrighted).
+*.iso
+build/
+data/
+*.DAT
+__pycache__/
+.DS_Store
