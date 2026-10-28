@@ -3,7 +3,9 @@
 A native macOS (Apple silicon) version of Mindscape's 1995 *Complete Reference Library* CD-ROM,
 rebuilt by reverse-engineering the original Windows program and its data formats. No emulation.
 
-It reads **your own disc image**; nothing from the disc is included in this repository.
+The finished app is self-contained: the disc is decoded once at build time and the result is
+embedded in the app bundle. Nothing from the disc is included in this repository, and because the
+built app contains the (copyrighted) disc content it is for personal use, not for sharing.
 
 ## What's on the disc
 
@@ -18,12 +20,13 @@ Requires macOS 15+, Swift 6 (Command Line Tools are enough). For video, install 
 (`brew install ffmpeg`): the disc's Indeo 3 video is converted once during import.
 
 ```sh
-./scripts/make-app.sh                     # -> dist/Complete Reference Library.app
+./scripts/make-app.sh --iso "Complete Reference Library (1995)(Mindscape).iso"
 open "dist/Complete Reference Library.app"
 ```
 
-On first launch, drop the `.iso` onto the window (or File ▸ Import Disc Image…). Import takes about
-a minute and builds `~/Library/Application Support/Complete Reference Library/library` (~1 GB).
+Decoding takes about 80 seconds; the app is ~1 GB and needs nothing else afterwards (the ISO can be
+put away). `--library DIR` embeds an already-built library instead; `--no-embed` builds an empty app
+that asks for the disc on first launch and keeps its library in Application Support.
 
 Command-line equivalents:
 

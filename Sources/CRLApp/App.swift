@@ -17,7 +17,9 @@ struct CRLMacApp: App {
         .defaultSize(width: 640 * defaultScale, height: 480 * defaultScale)
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("Import Disc Image…") { chooseDisc(model) }.keyboardShortcut("o")
+                if !AppModel.isEmbedded {
+                    Button("Import Disc Image…") { chooseDisc(model) }.keyboardShortcut("o")
+                }
             }
             CommandMenu("Library") {
                 Button("Index") { model.panel = .index }.keyboardShortcut("f")

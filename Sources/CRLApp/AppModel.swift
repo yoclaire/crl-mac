@@ -41,10 +41,19 @@ final class AppModel: ObservableObject {
     let player = MediaPlayer()
     private var searchTask: Task<Void, Never>?
 
-    static var libraryURL: URL {
+    /// Where a disc import writes its library (used only by builds without embedded content).
+    static var importedLibraryURL: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Complete Reference Library/library", isDirectory: true)
     }
+
+    /// Library built into the app bundle by `scripts/make-app.sh` (the normal case).
+    static var embeddedLibraryURL: URL? {
+        Bundle.main.resourceURL.map { $0.appendingPathComponent("library", isDirectory: true) }.flatMap { Library.isBuilt($0) ? $0 : nil }
+    }
+
+    static var isEmbedded: Bool { embeddedLibraryURL != nil }
+    static var libraryURL: URL { embeddedLibraryURL ?? importedLibraryURL }
 
     init() {
         if Library.isBuilt(Self.libraryURL), let lib = try? Library(directory: Self.libraryURL) {
@@ -62,14 +71,14 @@ final class AppModel: ObservableObject {
     func importDisc(_ iso: URL) {
         screen = .importing
         importError = nil
-        let out = Self.libraryURL
+        let out = Self.importedLibraryURL
         Task.detached(priority: .userInitiated) {
             do {
                 let b = try LibraryBuilder(isoURL: iso, output: out)
                 b.progress = { msg, f in Task { @MainActor in self.importStatus = msg; self.importFraction = f } }
                 try b.build()
                 let lib = try Library(directory: out)
-                await MainActor.run { self.library = lib; self.screen = .room; self.sound("success.wav") }
+                await MainActor.run { Art.directory = out; self.library = lib; self.screen = .room; self.sound("success.wav") }
             } catch {
                 await MainActor.run { self.importError = "\(error)"; self.screen = .welcome }
             }
