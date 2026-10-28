@@ -153,3 +153,16 @@ reject stale/index copies with a length check.
   (D T A Q E S W H N L, then map, video, sound, music, picture, animation, search).
 - Panel geometry (Subject List, article pane, media combo) was measured from a screenshot of the
   original running; it is not in the resources.
+
+## Media Library names and groupings (derived)
+
+Only photos have authored captions (MEDIA.UTL) and categories (MEDIA.CTG). For everything else the
+importer derives names from the disc's own data (`LibraryBuilder.nameAndGroupMedia`):
+
+| Type | Name | Categories |
+|---|---|---|
+| Pronunciations | the word in their MEDIA.DBS item | A–Z, "#", plus "Unlabelled" for 112 recordings no entry references |
+| Music | first article MEDIA.LNK links it to (repeats numbered) | Instruments (`500xxxx.MID`) / Musical Styles (`60xxx.MID`) |
+| Video, animation | linked article whose title matches the file name, else the first link | one group each |
+| Maps | name-matched article title, or the alias table | 12 regions: MEDIA.FIL stores maps as one alphabetical run per region (region names are ours) |
+| Photos not in any CTG category | — | "Other Pictures" |
