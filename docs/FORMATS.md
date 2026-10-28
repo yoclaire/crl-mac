@@ -83,3 +83,53 @@ Locating entry `n`: `k = n >> shift`; start at code index `ckpt[k]`; skip
 
 Verified: a sequential decode of every database yields exactly N+1 entries and matches
 random-access lookups (`tools/verify.py`).
+
+## Media blob store (`MEDIADB/MEDIA.FIL`)
+
+Sequential records: `char name[14]` (NUL-padded 8.3 name), `u32 LE size`, 8 reserved bytes,
+then `size` bytes of payload. 11,784 records:
+
+| Kind | Count | Payload |
+|---|---|---|
+| `*.WAV` | 9,964 | RIFF WAVE, MS-ADPCM (tag 2), mono 22.05 kHz — Core Audio decodes it natively |
+| `*.PIC` | 1,502 | photo, see below |
+| `*.MAP` | 318 | map, same encoding as PIC |
+
+PIC/MAP payload = `BITMAPFILEHEADER` + 68-byte `BITMAPINFOHEADER` with `biCompression='JPEG'`
+(negative height = top-down) + a 216-colour palette (for 8-bit displays) + a JFIF stream at
+`bfOffBits`.
+
+The JFIF stream is **abbreviated**: it has no DQT/DHT. Pegasus (`PEGASUS.DLL`, Watcom C 1994)
+reconstructs them from an `APP1` segment `"PIC\0", u8 flag, u8 Ql, u8 Qc, u8 ?`
+(handler `FUN_004113ac`, via the marker jump table at `0x4200a0`):
+
+- `FUN_00415444`: `q[i] = clamp((base[i] * Q) >> 5, 1, 255)`; luma uses `Ql`, chroma `Qc`;
+  base tables at `0x430750` / `0x430790` are the JPEG Annex K tables in zigzag order.
+- `FUN_00415278`: the standard Annex K Huffman tables.
+
+`tools/mediafil.py` rebuilds a conforming JPEG by inserting those segments; all 1,820 images decode.
+
+## Media catalogue (`MEDIA.DBS/.LNK/.UTL/.CTG`)
+
+Trio Systems C-Index files ("(c) Copyright Trio Systems 1983-1990" in `CRL32.EXE`; opened by
+`FUN_0044dae4`). Records are `u8 L, 01 80, …` spanning `L+1` bytes, stored in B-tree pages; the
+readers in `tools/mediadb.py` scan for self-validating records instead of walking the tree, and
+reject stale/index copies with a length check.
+
+- **DBS** (12,588 records) — dictionary media. `u32 ahd_entry, u32 link (db<<24 | entry),
+  u16 n_pictures, u16 n_sounds, u16, u8, u32 varlen (= L+1-11)`, then 56-byte items
+  `{u8 type (0 picture, 2 sound), char label[51], u32 MEDIA.FIL record offset}`.
+  Pictures and pronunciations of American Heritage Dictionary entries; all 13,455 offsets land on record starts.
+- **LNK** (212 records) — `MID`/`AVI`/`ANI` file → `[(u32 db_code, u32 entry)]`, after a 7-byte pad.
+  db codes: 0 = AHD, 2 = Almanac, 4 = Columbia, 7 = Reader's Companion.
+- **UTL** (1,501 records) — picture name → `u32 MEDIA.FIL offset`, caption.
+- **CTG** — gallery categories → lists of 14-byte picture names (34 of the categories parse so far;
+  `@@@_CATG_NAMES` holds the master name list; TODO).
+
+## Video (`VIDEOS/*.AVI`, `HELP/*.AVI`, `ANIMATE/*.ANI`)
+
+`.ANI` files are plain AVIs. Every clip is Intel Indeo 3.2 (`IV32`) video with 8-bit PCM audio at
+22.05 kHz. AVFoundation can't decode Indeo 3, so the importer converts each clip once with ffmpeg
+(`h264_videotoolbox` + AAC, ~0.6 s per clip).
+
+`MUSIC/*.MID` is standard MIDI (`AVMIDIPlayer`).
