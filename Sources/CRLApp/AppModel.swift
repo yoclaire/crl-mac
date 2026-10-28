@@ -23,6 +23,13 @@ final class AppModel: ObservableObject {
     @Published var overlay: Library.MediaRef?          // picture/map/video shown over the article pane
     @Published var overlayItems: [Library.MediaRef] = []
 
+    // Media Library
+    @Published var mediaType = "picture"
+    @Published var mediaCategories: [String] = []
+    @Published var mediaCategory: String?
+    @Published var mediaItems: [Library.MediaRef] = []
+    @Published var mediaItem: Library.MediaRef?
+
     // Index (search)
     @Published var query = ""
     @Published var hits: [Library.Hit] = []
@@ -198,6 +205,28 @@ final class AppModel: ObservableObject {
         highlights["\(a.book)/\(a.num)", default: []].append(r)
         tv.textStorage?.addAttribute(.backgroundColor, value: Palette.highlight, range: r)
         tv.setSelectedRange(NSRange(location: NSMaxRange(r), length: 0))
+    }
+
+    // MARK: Media Library
+
+    func selectMediaType(_ kind: String) {
+        player.stop()
+        mediaType = kind
+        mediaCategories = (try? library?.categories(kind: kind)) ?? []
+        selectMediaCategory(mediaCategories.first)
+    }
+
+    func selectMediaCategory(_ c: String?) {
+        mediaCategory = c
+        mediaItems = c.flatMap { try? library?.media(inCategory: $0, kind: mediaType) } ?? []
+        mediaItem = nil
+    }
+
+    func selectMediaItem(_ m: Library.MediaRef) {
+        mediaItem = m
+        guard let path = m.path, let library else { return }
+        if m.kind == "sound" { player.playSound(library.url(path)) }
+        if m.kind == "music" { player.playMIDI(library.url(path)) }
     }
 
     func addBookmark() {

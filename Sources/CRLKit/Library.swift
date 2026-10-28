@@ -102,15 +102,18 @@ public final class Library: @unchecked Sendable {
         }
     }
 
-    public func categories() throws -> [String] {
-        try db.rows("SELECT name FROM categories ORDER BY name") { $0.string(0)! }
+    /// Media Library categories for one media kind. Photo categories are alphabetical with
+    /// "Other Pictures" last; derived groupings (map regions, A–Z) keep their build order.
+    public func categories(kind: String) throws -> [String] {
+        let order = kind == "picture" ? "name = 'Other Pictures', name" : "ord"
+        return try db.rows("SELECT name FROM categories WHERE kind = ? ORDER BY \(order)", kind) { $0.string(0)! }
     }
 
-    public func media(inCategory c: String) throws -> [MediaRef] {
+    public func media(inCategory c: String, kind: String) throws -> [MediaRef] {
         try db.rows("""
             SELECT m.name, m.kind, m.path, m.caption, m.width, m.height FROM category_items ci JOIN media m ON m.name = ci.media
-            WHERE ci.category = ? ORDER BY COALESCE(m.caption, m.name)
-            """, c) {
+            WHERE ci.category = ? AND m.kind = ? AND m.path IS NOT NULL ORDER BY COALESCE(m.caption, m.name) COLLATE NOCASE
+            """, c, kind) {
             MediaRef(name: $0.string(0)!, kind: $0.string(1)!, path: $0.string(2), caption: $0.string(3), label: nil,
                      width: $0.string(4).flatMap(Int.init), height: $0.string(5).flatMap(Int.init))
         }

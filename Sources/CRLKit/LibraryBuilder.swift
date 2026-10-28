@@ -70,6 +70,7 @@ public final class LibraryBuilder {
         let filIndex = try buildMediaFile(db)
         try buildCatalog(db, filIndex: filIndex)
         try buildDiscMedia(db)
+        try nameAndGroupMedia(db)
         try buildUI()
 
         try db.prepare("INSERT INTO meta VALUES (?, ?)").run("schema", "\(Self.schemaVersion)")
@@ -161,6 +162,7 @@ public final class LibraryBuilder {
         let cat = try db.prepare("INSERT INTO categories VALUES (?, ?, ?)"), item = try db.prepare("INSERT INTO category_items VALUES (?, ?, ?)")
         for (k, c) in MediaCatalog.categories(try iso.contents("CRL/MEDIADB/MEDIA.CTG")).enumerated() {
             try cat.run(c.name, "picture", k)
+            // (ord continues in nameAndGroupMedia)
             for (j, p) in c.pictures.enumerated() { try item.run(c.name, p, j) }
         }
         try db.exec("COMMIT")
@@ -189,14 +191,25 @@ public final class LibraryBuilder {
             let stem = key(Self.mapAliases[raw] ?? raw)
             let alias = Self.mapAliases[raw] != nil
             guard let cands = byPrefix[String(stem.prefix(8))]?.filter({ !alias || $0.key == stem || $0.key.hasPrefix(stem) }),
-                  !cands.isEmpty else { continue }
+                  !cands.isEmpty else {
+                if let name = Self.mapCaptions[raw] ?? Self.mapAliases[raw] { try cap.run(name, m) }   // unlinked, but still named
+                continue
+            }
             // Shortest matching title per book ("Afghanistan" over "Afghanistan War").
             var best: [String: (num: Int, title: String)] = [:]
             for c in cands where best[c.book].map({ c.title.count < $0.title.count }) ?? true { best[c.book] = (c.num, c.title) }
             for (book, b) in best { try link.run(book, b.num, m, 50) }
-            if let caption = best["encyclopedia"]?.title ?? best["almanac"]?.title ?? Self.mapAliases[raw] { try cap.run(caption, m) }
+            if let caption = Self.mapCaptions[raw] ?? Self.mapAliases[raw] ?? best["encyclopedia"]?.title ?? best["almanac"]?.title {
+                try cap.run(caption, m)
+            }
         }
     }
+
+    /// Display names where the article title would be ambiguous.
+    static let mapCaptions: [String: String] = [
+        "OKLAHOMA": "Oklahoma City", "PORTLANM": "Portland, Maine", "PORTLANO": "Portland, Oregon", "KANSASCI": "Kansas City",
+        "NEWYORKC": "New York City", "SALTLAKE": "Salt Lake City",
+    ]
 
     /// Map names that are abbreviations rather than truncations.
     static let mapAliases: [String: String] = [
@@ -217,6 +230,116 @@ public final class LibraryBuilder {
         "OK": "Oklahoma", "OR": "Oregon", "PA": "Pennsylvania", "RI": "Rhode Island", "SC": "South Carolina", "SD": "South Dakota",
         "TN": "Tennessee", "TX": "Texas", "UT": "Utah", "VA": "Virginia", "VT": "Vermont", "WA": "Washington", "WI": "Wisconsin",
         "WV": "West Virginia", "WY": "Wyoming",
+    ]
+
+    // MARK: Media Library names and categories
+
+    /// Only photos have authored captions and categories on the disc (MEDIA.UTL / MEDIA.CTG). Everything
+    /// else gets a name and grouping derived from the disc's own data so the Media Library never shows
+    /// raw 8.3 file names:
+    /// - pronunciations: the word from MEDIA.DBS, grouped A–Z
+    /// - music: the first article MEDIA.LNK links it to; 500xxxx = instruments, 60xxx = styles
+    /// - video/animation: the linked article whose title matches the file name, else the first link
+    /// - maps: MEDIA.FIL stores them in one alphabetical run per region; each run is a category
+    /// - photos in no MEDIA.CTG category: "Other Pictures"
+    func nameAndGroupMedia(_ db: SQLite) throws {
+        progress("Indexing the Media Library", 0.955)
+        try db.exec("BEGIN")
+        let setCaption = try db.prepare("UPDATE media SET caption = ? WHERE name = ? AND (caption IS NULL OR caption = '')")
+        let addCategory = try db.prepare("INSERT INTO categories VALUES (?, ?, ?)")
+        let addItem = try db.prepare("INSERT INTO category_items VALUES (?, ?, ?)")
+        var order = try db.rows("SELECT COALESCE(MAX(ord), 0) FROM categories") { $0.int(0) }.first ?? 0
+        func category(_ name: String, _ kind: String, _ members: [String]) throws {
+            guard !members.isEmpty else { return }
+            order += 1
+            try addCategory.run(name, kind, order)
+            for (k, m) in members.enumerated() { try addItem.run(name, m, k) }
+        }
+        func capitalized(_ t: String) -> String { t.prefix(1).uppercased() + t.dropFirst() }
+        func key(_ t: String) -> String { t.uppercased().filter { $0.isLetter || $0.isNumber } }
+
+        // Pronunciations
+        let words = try db.rows("""
+            SELECT media, MIN(label) FROM entry_media WHERE book = 'dictionary' AND media LIKE '%.WAV' AND label != '' GROUP BY media
+            """) { ($0.string(0)!, $0.string(1)!) }
+        for (m, w) in words { try setCaption.run(w, m) }
+        var byLetter: [String: [String]] = [:]
+        for (m, w) in words {
+            let c = w.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil).first.map { String($0).uppercased() } ?? "#"
+            byLetter[c.first!.isLetter ? c : "#", default: []].append(m)
+        }
+        for letter in byLetter.keys.sorted() { try category(letter, "sound", byLetter[letter]!) }
+        // Recordings no dictionary entry refers to: listed rather than hidden.
+        let orphans = try db.rows("""
+            SELECT name FROM media WHERE kind = 'sound' AND name NOT IN (SELECT media FROM entry_media) ORDER BY name
+            """) { $0.string(0)! }
+        for m in orphans { try setCaption.run("Recording \((m as NSString).deletingPathExtension)", m) }
+        try category("Unlabelled", "sound", orphans)
+
+        // Music, video, animation: names from the article links
+        for kind in ["music", "video", "animation"] {
+            let items = try db.rows("SELECT name FROM media WHERE kind = ? AND path IS NOT NULL ORDER BY name", kind) { $0.string(0)! }
+            var groups: [String: [String]] = [:]
+            for m in items {
+                let links = try db.rows("""
+                    SELECT e.book, e.title FROM entry_media em JOIN entries e ON e.book = em.book AND e.num = em.num
+                    WHERE em.media = ? ORDER BY em.ord
+                    """, m) { ($0.string(0)!, $0.string(1)!.replacingOccurrences(of: #" \[\d+\]$"#, with: "", options: .regularExpression)) }
+                let stem = key((m as NSString).deletingPathExtension)
+                let pick = links.first { key($0.1).hasPrefix(stem) || (stem.count >= 4 && key($0.1).hasPrefix(String(stem.prefix(5)))) }
+                    ?? (kind == "music" ? links.first : links.first { $0.0 == "encyclopedia" } ?? links.first)
+                let number = (m as NSString).deletingPathExtension
+                let caption = pick.map { capitalized($0.1) } ?? (kind == "music" ? "Music \(number)" : capitalized(number.lowercased()))
+                try setCaption.run(caption, m)
+                let group = kind == "music" ? (number.hasPrefix("500") ? "Instruments" : "Musical Styles")
+                                            : (kind == "video" ? "All Videos" : "All Animations")
+                groups[group, default: []].append(m)
+            }
+            for g in groups.keys.sorted() { try category(g, kind, groups[g]!) }
+            // Several clips can link to the same article ("Bass" ×3): number the repeats.
+            let dupes = try db.rows("""
+                SELECT name, caption FROM media WHERE kind = ? AND caption IN
+                  (SELECT caption FROM media WHERE kind = ? GROUP BY caption HAVING COUNT(*) > 1) ORDER BY caption, name
+                """, kind, kind) { ($0.string(0)!, $0.string(1)!) }
+            let renumber = try db.prepare("UPDATE media SET caption = ? WHERE name = ?")
+            var seen: [String: Int] = [:]
+            for (m, c) in dupes {
+                seen[c, default: 0] += 1
+                if seen[c]! > 1 { try renumber.run("\(c) \(seen[c]!)", m) }
+            }
+        }
+
+        // Maps: one alphabetical run per region in MEDIA.FIL order (media rows were inserted in that order)
+        let maps = try db.rows("SELECT name FROM media WHERE kind = 'map' ORDER BY rowid") { $0.string(0)! }
+        var runs: [[String]] = []
+        for m in maps {
+            if let last = runs.last?.last, m >= last { runs[runs.count - 1].append(m) } else { runs.append([m]) }
+        }
+        var regions: [(String, [String])] = []
+        for run in runs {
+            let stems = Set(run.map { ($0 as NSString).deletingPathExtension })
+            let name = Self.mapRegions.first { !stems.isDisjoint(with: $0.members) }?.name ?? "Maps"
+            if let i = regions.firstIndex(where: { $0.0 == name }) { regions[i].1 += run } else { regions.append((name, run)) }
+        }
+        for (name, members) in regions { try category(name, "map", members) }
+
+        // Photos outside every MEDIA.CTG category
+        let loose = try db.rows("""
+            SELECT name FROM media WHERE kind = 'picture' AND name NOT IN (SELECT media FROM category_items)
+            """) { $0.string(0)! }
+        try category("Other Pictures", "picture", loose)
+        try db.exec("COMMIT")
+    }
+
+    /// Region names for the map runs, keyed by a few members of each run (names are ours; the disc
+    /// only implies the grouping).
+    static let mapRegions: [(name: String, members: Set<String>)] = [
+        ("Asia", ["AFGHANIS", "CHINA", "JAPAN"]), ("Europe", ["ALBANIA", "FRANCE", "GERMANY"]),
+        ("Africa", ["ALGERIA", "KENYA", "NIGERIA"]), ("Caribbean", ["ANGUILLA", "CUBA", "JAMAICA"]),
+        ("South America", ["ARGENTIN", "BRAZIL", "PERU"]), ("Former Soviet Republics", ["ARMENIA", "RUSSIA", "UKRAINE"]),
+        ("Australia and Oceania", ["AUSTRALI", "FIJI", "NEWZEALA"]), ("Central America", ["BELIZE", "MEXICO", "PANAMA"]),
+        ("North America and the Arctic", ["CANADA", "US", "ARCTIC"]), ("Middle East", ["BAHRAIN", "EGYPT", "ISRAEL"]),
+        ("U.S. Cities", ["ALBUQUER", "BOSTON", "CHICAGO"]), ("U.S. States", ["AK", "CA", "NY", "ID", "TX"]),
     ]
 
     // MARK: video / music

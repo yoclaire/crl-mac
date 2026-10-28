@@ -7,10 +7,8 @@ import SwiftUI
 struct MediaLibraryView: View {
     @EnvironmentObject var model: AppModel
     let s: CGFloat
-    @State private var type = "picture"
-    @State private var category: String?
-    @State private var item: Library.MediaRef?
-    @State private var playingAll = false
+    var type: String { model.mediaType }
+    var item: Library.MediaRef? { model.mediaItem }
 
     // Icon positions located on bitmap 308 by template matching.
     // (normal sprite as it sits on bitmap 308, selected-state sprite)
@@ -26,26 +24,21 @@ struct MediaLibraryView: View {
     static let itemsRect = CGRect(x: 304, y: 44, width: 228, height: 150)
     static let viewer = CGRect(x: 128, y: 202, width: 404, height: 238)
 
-    var categories: [String] { type == "picture" ? ((try? model.library?.categories()) ?? []) : [] }
-    var items: [Library.MediaRef] {
-        guard let lib = model.library else { return [] }
-        if type == "picture", let c = category { return (try? lib.media(inCategory: c)) ?? [] }
-        return ((try? lib.media(kind: type)) ?? []).filter { $0.path != nil }
-    }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
             PixelImage(image: Art.image(308)).frame(width: 640 * s, height: 480 * s)
             ForEach(Self.types, id: \.kind) { t in
-                Button { type = t.kind; category = nil; item = nil } label: {
+                Button { model.selectMediaType(t.kind) } label: {
                     PixelImage(image: Art.image(t.kind == type ? t.selected : t.sprite))
                 }.buttonStyle(.plain).place(t.rect, s)
             }
+            let categories = model.mediaCategories
             PanelFrame(s: s) {
-                SubjectTable(rows: categories.enumerated().map { .init(title: $1, icon: iconRow(media: "picture"), tag: $0, column: 2) },
-                             selected: categories.firstIndex(of: category ?? "") , scale: s) { category = categories[$0]; item = nil }
-            }.place(Self.categoriesRect, s).opacity(type == "picture" ? 1 : 0.4)
-            let list = items
+                SubjectTable(rows: categories.enumerated().map { .init(title: $1, icon: iconRow(media: type), tag: $0, column: 2) },
+                             selected: categories.firstIndex(of: model.mediaCategory ?? ""), scale: s) { model.selectMediaCategory(categories[$0]) }
+            }.place(Self.categoriesRect, s)
+            let list = model.mediaItems
             PanelFrame(s: s) {
                 SubjectTable(rows: list.enumerated().map { .init(title: $1.caption ?? $1.name, icon: iconRow(media: $1.kind), tag: $0) },
                              selected: item.flatMap { list.firstIndex(of: $0) }, scale: s) { select(list[$0]) }
@@ -54,6 +47,7 @@ struct MediaLibraryView: View {
             controls(list)
         }
         .frame(width: 640 * s, height: 480 * s)
+        .onAppear { if model.mediaCategories.isEmpty { model.selectMediaType(model.mediaType) } }
     }
 
     @ViewBuilder var viewer: some View {
@@ -75,12 +69,7 @@ struct MediaLibraryView: View {
         .overlay(Rectangle().stroke(Color(nsColor: Palette.frame), lineWidth: max(1, s)))
     }
 
-    func select(_ m: Library.MediaRef) {
-        item = m
-        guard let path = m.path, let lib = model.library else { return }
-        if m.kind == "sound" { model.player.playSound(lib.url(path)) }
-        if m.kind == "music" { model.player.playMIDI(lib.url(path)) }
-    }
+    func select(_ m: Library.MediaRef) { model.selectMediaItem(m) }
 
     func controls(_ list: [Library.MediaRef]) -> some View {
         let idx = item.flatMap { list.firstIndex(of: $0) } ?? -1

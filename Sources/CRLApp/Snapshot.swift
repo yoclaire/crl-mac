@@ -13,7 +13,13 @@ enum Snapshot {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             let parts = scenario.split(separator: ":", maxSplits: 1).map(String.init)
             switch parts.first {
-            case "media": model.screen = .mediaLibrary
+            case "media":
+                // media[:kind[:category[:item index]]]
+                model.screen = .mediaLibrary
+                let f = scenario.split(separator: ":").map(String.init)
+                if f.count > 1 { model.selectMediaType(f[1]) }
+                if f.count > 2 { model.selectMediaCategory(f[2]) }
+                if f.count > 3, let i = Int(f[3]), i < model.mediaItems.count { model.selectMediaItem(model.mediaItems[i]); model.player.stop() }
             case "hover": model.hover = parts.count > 1 ? parts[1] : nil
             case "index": model.panel = .index; model.query = parts.count > 1 ? parts[1] : ""; model.search()
             case let b?:
