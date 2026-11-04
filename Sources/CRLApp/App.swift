@@ -21,20 +21,44 @@ struct CRLMacApp: App {
                     Button("Import Disc Image…") { chooseDisc(model) }.keyboardShortcut("o")
                 }
             }
-            CommandMenu("Library") {
-                Button("Index") { model.panel = .index }.keyboardShortcut("f")
-                Button("Table of Contents") { model.panel = .contents }.keyboardShortcut("t")
-                Button("Reference Trails") { model.panel = .trails }.keyboardShortcut("y")
-                Button("Bookmark Article") { model.addBookmark() }.keyboardShortcut("d")
-                Button("Media Library") { model.screen = .mediaLibrary }.keyboardShortcut("m", modifiers: [.command, .shift])
+            CommandGroup(replacing: .printItem) {
+                Button("Print Item…") { model.printArticle() }.keyboardShortcut("p").disabled(model.article == nil)
+            }
+            CommandGroup(after: .pasteboard) {
+                Button("Copy Item to Clipboard") { model.copyArticle() }.keyboardShortcut("c", modifiers: [.command, .shift])
+                    .disabled(model.article == nil)
+            }
+            // The original's keyboard accelerators (CRL32.HLP "Keyboard"): Alt+letter becomes ⌥⌘letter,
+            // Ctrl+S/D/G (bookmarks) become ⌘S/⌘D/⌘G.
+            CommandMenu("Room") {
+                Button("Find in Index…") { model.panel = .index }.keyboardShortcut("f")
                 Divider()
-                Toggle("Button Sounds", isOn: $model.buttonSounds)
+                Group {
+                    room("Text", "t", "textbook"); room("Maps", "m", "globe"); room("Pictures", "p", "camera")
+                    room("Video", "v", "videocam"); room("Animations", "a", "filmstrip"); room("Music", "u", "trumpet")
+                    room("Sound", "o", "speaker")
+                }
+                Divider()
+                Group {
+                    room("Search", "s", "magnifier"); room("Index", "i", "index"); room("Table of Contents", "n", "toc")
+                    room("Reference Trails", "r", "notepad"); room("Highlight", "h", "glue"); room("Bookmark", "b", "eraser")
+                    room("Media Libraries", "l", "media")
+                }
+                Divider()
+                Button("Set Bookmark…") { model.setBookmark() }.keyboardShortcut("s").disabled(model.article == nil)
+                Button("Go to Bookmark…") { model.bookmarkMenu() }.keyboardShortcut("g")
+                Button("Delete Bookmark…") { model.bookmarkMenu() }.keyboardShortcut("d")
+                Divider()
+                Button("Text and Video Help") { model.activate("help") }.keyboardShortcut("?")
             }
         }
         Settings {
-            Form { Toggle("Button sounds", isOn: $model.buttonSounds) }.padding().frame(width: 280)
-                .environmentObject(model)
+            ConfigurationView().environmentObject(model)
         }
+    }
+
+    @ViewBuilder func room(_ title: String, _ key: KeyEquivalent, _ object: String) -> some View {
+        Button(title) { model.activate(object) }.keyboardShortcut(key, modifiers: [.command, .option])
     }
 
     var defaultScale: CGFloat {
@@ -139,5 +163,39 @@ struct WelcomeView: View {
             }
             return true
         }
+    }
+}
+
+/// CRL32's "System Configuration" dialog (resource 438), opened from the computer on the desk.
+/// The CD-ROM drive and Quick Reference startup settings have no meaning here and are left out.
+struct ConfigurationView: View {
+    @EnvironmentObject var model: AppModel
+    var body: some View {
+        Form {
+            Section("Search Options") {
+                Picker("Search type", selection: $model.searchTypeDefault) {
+                    Text("Quick Subject Search").tag("quick")
+                    Text("Full Text Search").tag("full")
+                    Text("Search Menu").tag("menu")
+                }
+                Toggle("Indexing while typing", isOn: $model.indexing)
+            }
+            Section("Save Options") {
+                Toggle("Selected Books", isOn: $model.saveBooks)
+                Toggle("Reference Trails", isOn: $model.saveTrails)
+                Toggle("Current Article", isOn: $model.saveArticle)
+            }
+            Section("Expand to Full View") {
+                Toggle("Pictures and Images", isOn: $model.expandPictures)
+                Toggle("Maps", isOn: $model.expandMaps)
+            }
+            Section("Help Options") {
+                Toggle("Pass-Over Help", isOn: $model.passOverHelp)
+                Toggle("Button Sounds", isOn: $model.buttonSounds)
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: 360)
+        .navigationTitle("System Configuration")
     }
 }

@@ -5,7 +5,7 @@
 # Contents/Resources/library, so the finished app needs no ISO.
 #
 #   scripts/make-app.sh                       # embed the library: build/library, else the app's Application
-#                                             #   Support one, else download it from this repo's latest release
+#                                             #   Support one, else download it from release $LIBRARY_RELEASE
 #   scripts/make-app.sh --iso "Complete Reference Library (1995)(Mindscape).iso"   # decode the disc, then embed
 #   scripts/make-app.sh --library DIR         # embed a library built with `crltool import`
 #   scripts/make-app.sh --download            # (re)download the release library into build/library, then embed
@@ -16,6 +16,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# The release that carries the decoded library (CRL-library-*.zip); bump it, and scripts/library.sha256,
+# only when a decoder change produces a new library. App-only releases don't need to re-upload it.
+LIBRARY_RELEASE="v0.3"
 LIB=""; ISO=""; EMBED=1; DOWNLOAD=0
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -47,9 +50,9 @@ fi
 if [ "$EMBED" = 1 ] && { [ "$DOWNLOAD" = 1 ] || [ -z "$LIB" ]; }; then
   # The decoded library is published (privately) as a release asset, so no disc is needed to build.
   command -v gh >/dev/null || { echo "no library found and gh is not installed — pass --iso or --library" >&2; exit 1; }
-  echo "downloading the library from the latest release…"
+  echo "downloading the library from release $LIBRARY_RELEASE…"
   rm -rf build/library.download && mkdir -p build/library.download
-  gh release download --pattern 'CRL-library-*.zip' --dir build/library.download
+  gh release download "$LIBRARY_RELEASE" --pattern 'CRL-library-*.zip' --dir build/library.download
   # scripts/library.sha256 pins the published archive; a mismatch stops the build.
   ( cd build/library.download && shasum -a 256 -c ../../scripts/library.sha256 ) || { echo "library archive checksum mismatch" >&2; exit 1; }
   ditto -x -k build/library.download/CRL-library-*.zip build/library.download/unpacked
@@ -78,8 +81,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleIdentifier</key><string>com.clairemara.crl-mac</string>
   <key>CFBundleExecutable</key><string>CRLApp</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.3</string>
-  <key>CFBundleVersion</key><string>3</string>
+  <key>CFBundleShortVersionString</key><string>0.4</string>
+  <key>CFBundleVersion</key><string>4</string>
   <key>LSMinimumSystemVersion</key><string>15.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>LSApplicationCategoryType</key><string>public.app-category.reference</string>

@@ -39,23 +39,83 @@ final class AppModel: ObservableObject {
     // Index (search)
     @Published var query = ""
     @Published var hits: [Library.Hit] = []
-    @Published var fullText = false
+    @Published var fullText = AppModel.defaults.string(forKey: "SearchTypeDefault") == "full"
+    /// The last submitted search found nothing (CRL32's Quick/Full Text Search Failure dialogs).
+    @Published var searchFailed = false
+    /// `hits` holds Spell Check suggestions rather than search results.
+    @Published var suggesting = false
 
     // Room
     @Published var hover: String?
-    @Published var highlights: [String: [NSRange]] = [:]   // Highlighter marks, per article (this session)
+    /// Highlighter marks per article ("book/num" → ranges in the rendered text), kept between launches.
+    @Published var highlights: [String: [NSRange]] = [:] {
+        didSet { AppModel.defaults.set(highlights.mapValues { $0.map { [$0.location, $0.length] } }, forKey: "Highlights") }
+    }
     @Published var windowActive = true
     /// A disc image is being dragged over the welcome screen. Lives here rather than in a view's
     /// `@State`: SwiftUI's `State` macro plugin ships with Xcode only, so CLT-only builds can't expand it.
     @Published var droppingDisc = false
-    @Published var trail: [Library.Hit] = []
-    @Published var bookmarks: [Library.Hit] = []
-    @Published var buttonSounds = UserDefaults.standard.object(forKey: "ButtonSounds") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(buttonSounds, forKey: "ButtonSounds") }
+    /// Reference Trails: articles visited, newest first (saved between launches when SaveTrails is on).
+    @Published var trail: [Library.Hit] = [] { didSet { if saveTrails { AppModel.defaults.set(trail.map(Self.plist), forKey: "Trails") } } }
+    @Published var trailSelection: Int?
+    struct Bookmark: Hashable { let name: String; let hit: Library.Hit }
+    @Published var bookmarks: [Bookmark] = [] {
+        didSet { AppModel.defaults.set(bookmarks.map { Self.plist($0.hit).merging(["name": $0.name]) { $1 } }, forKey: "Bookmarks") }
+    }
+    /// Books whose index the search covers: the ones opened from the bookcase. CRL32's default is
+    /// OpenReferences = "1010100100" (by book code: Dictionary, Almanac, Encyclopedia, American History).
+    @Published var openBooks: Set<String> = [] { didSet { if saveBooks { AppModel.defaults.set(Self.bookMask(openBooks), forKey: "OpenReferences") } } }
+
+    // MARK: System Configuration (CRL32's dialog 438; UserDefaults keys are its registry value names)
+    @Published var searchTypeDefault = AppModel.defaults.string(forKey: "SearchTypeDefault") ?? "quick" {   // quick | full | menu
+        didSet { AppModel.defaults.set(searchTypeDefault, forKey: "SearchTypeDefault") }
+    }
+    @Published var indexing = AppModel.flag("Indexing", true) { didSet { AppModel.defaults.set(indexing, forKey: "Indexing") } }
+    @Published var saveBooks = AppModel.flag("SaveBooks", true) {
+        didSet { AppModel.defaults.set(saveBooks, forKey: "SaveBooks"); if saveBooks { AppModel.defaults.set(Self.bookMask(openBooks), forKey: "OpenReferences") } }
+    }
+    @Published var saveTrails = AppModel.flag("SaveTrails", true) {
+        didSet { AppModel.defaults.set(saveTrails, forKey: "SaveTrails"); AppModel.defaults.set(saveTrails ? trail.map(Self.plist) : [], forKey: "Trails") }
+    }
+    @Published var saveArticle = AppModel.flag("Save Article", true) { didSet { AppModel.defaults.set(saveArticle, forKey: "Save Article") } }
+    @Published var expandPictures = AppModel.flag("ExpandPictures", false) { didSet { AppModel.defaults.set(expandPictures, forKey: "ExpandPictures") } }
+    @Published var expandMaps = AppModel.flag("ExpandMaps", false) { didSet { AppModel.defaults.set(expandMaps, forKey: "ExpandMaps") } }
+    @Published var passOverHelp = AppModel.flag("PassOverHelp", true) { didSet { AppModel.defaults.set(passOverHelp, forKey: "PassOverHelp") } }
+    @Published var buttonSounds = AppModel.defaults.object(forKey: "ButtonSounds") as? Bool ?? AppModel.flag("EnableSounds", true) {
+        didSet { AppModel.defaults.set(buttonSounds, forKey: "ButtonSounds") }
+    }
+
+    /// Preferences. Snapshot runs (CRL_SNAPSHOT) get a scratch domain, wiped at launch, so test scenarios
+    /// never touch the real trails, bookmarks or settings.
+    static let defaults: UserDefaults = {
+        guard ProcessInfo.processInfo.environment["CRL_SNAPSHOT"] != nil, let d = UserDefaults(suiteName: "com.clairemara.crl-mac.snapshot") else {
+            return .standard
+        }
+        d.removePersistentDomain(forName: "com.clairemara.crl-mac.snapshot")
+        for (k, v) in ProcessInfo.processInfo.environment where k.hasPrefix("CRL_PREF_") {
+            let key = String(k.dropFirst(9)).replacingOccurrences(of: "_", with: " ")
+            d.set(v == "1" ? true : v == "0" ? false : v as Any, forKey: key)
+        }
+        return d
+    }()
+
+    static func flag(_ key: String, _ def: Bool) -> Bool { AppModel.defaults.object(forKey: key) as? Bool ?? def }
+    static func plist(_ h: Library.Hit) -> [String: Any] { ["book": h.book, "num": h.num, "title": h.title] }
+    static func hit(_ d: [String: Any]) -> Library.Hit? {
+        guard let b = d["book"] as? String, let n = d["num"] as? Int, let t = d["title"] as? String else { return nil }
+        return Library.Hit(book: b, num: n, title: t)
+    }
+    /// Open books as CRL32's 10-character mask, one digit per book code.
+    static func bookMask(_ open: Set<String>) -> String {
+        String((0..<10).map { code in Book.all.first { $0.mediaCode == code }.map { open.contains($0.id) ? "1" : "0" } ?? "0" })
+    }
+    static func books(mask: String) -> Set<String> {
+        Set(mask.enumerated().compactMap { i, c in c == "1" ? Book.all.first { $0.mediaCode == i }?.id : nil })
     }
 
     let player = MediaPlayer()
     private var searchTask: Task<Void, Never>?
+    private var pendingSubmit: String?
 
     /// Where a disc import writes its library (used only by builds without embedded content).
     static var importedLibraryURL: URL {
@@ -76,9 +136,18 @@ final class AppModel: ObservableObject {
             library = lib
             screen = .room
         }
-        bookmarks = (UserDefaults.standard.array(forKey: "Bookmarks") as? [[String: Any]] ?? []).compactMap {
-            guard let b = $0["book"] as? String, let n = $0["num"] as? Int, let t = $0["title"] as? String else { return nil }
-            return Library.Hit(book: b, num: n, title: t)
+        let d = AppModel.defaults
+        bookmarks = (d.array(forKey: "Bookmarks") as? [[String: Any]] ?? []).compactMap { r in
+            Self.hit(r).map { Bookmark(name: r["name"] as? String ?? $0.title, hit: $0) }
+        }
+        openBooks = Self.books(mask: saveBooks ? d.string(forKey: "OpenReferences") ?? "1010100100" : "1010100100")
+        if saveTrails { trail = (d.array(forKey: "Trails") as? [[String: Any]] ?? []).compactMap(Self.hit) }
+        highlights = (d.dictionary(forKey: "Highlights") as? [String: [[Int]]] ?? [:]).mapValues {
+            $0.compactMap { $0.count == 2 ? NSRange(location: $0[0], length: $0[1]) : nil }
+        }
+        if saveArticle, library != nil, let h = (d.dictionary(forKey: "CurrentArticle")).flatMap(Self.hit) {
+            panel = .subjects
+            show(h)
         }
     }
 
@@ -106,6 +175,7 @@ final class AppModel: ObservableObject {
     func open(_ book: Book) {
         guard let library else { return }
         sound("refopen.wav")
+        openBooks.insert(book.id)
         self.book = book
         subjects = (try? library.subjects(book: book.id)) ?? []
         panel = .subjects
@@ -132,6 +202,7 @@ final class AppModel: ObservableObject {
         player.stop()
         article = try? library?.article(book: book, num: num)
         let hit = Library.Hit(book: book, num: num, title: article?.title ?? title)
+        if saveArticle { AppModel.defaults.set(Self.plist(hit), forKey: "CurrentArticle") }
         trail.removeAll { $0 == hit }
         trail.insert(hit, at: 0)
         if trail.count > 100 { trail.removeLast() }
@@ -194,11 +265,12 @@ final class AppModel: ObservableObject {
         if let kinds = Self.mediaKinds[name] { present(media(kinds)); return }
         switch name {
         case "textbook": overlay = nil; player.stop(); if panel == .none { panel = .subjects }
-        case "magnifier", "index": panel = .index
+        case "magnifier": searchMenuOrIndex()
+        case "index": panel = .index
         case "toc": panel = .contents
         case "notepad": panel = .trails
         case "help": panel = .help
-        case "eraser": addBookmark()
+        case "eraser": bookmarkMenu()
         case "glue": highlightSelection()
         case "copier": copyArticle()
         case "printer": printArticle()
@@ -209,6 +281,11 @@ final class AppModel: ObservableObject {
         case "sysmenu": NSApp.orderFrontStandardAboutPanel(nil)
         default: break
         }
+    }
+
+    /// "Expand to Full View": pictures and/or maps fill the window instead of the view window.
+    func isFullView(_ m: Library.MediaRef) -> Bool {
+        (m.kind == "picture" && expandPictures) || (m.kind == "map" && expandMaps)
     }
 
     func present(_ items: [Library.MediaRef]) {
@@ -234,11 +311,19 @@ final class AppModel: ObservableObject {
     }
 
     /// Highlighter: mark the selected article text in yellow (select text first, then click the pen).
+    /// Highlighting over existing marks removes them instead. Marks are kept between launches.
     func highlightSelection() {
         guard let a = article, let tv = ArticleTextView.current, tv.selectedRange().length > 0 else { NSSound.beep(); return }
-        let r = tv.selectedRange()
-        highlights["\(a.book)/\(a.num)", default: []].append(r)
-        tv.textStorage?.addAttribute(.backgroundColor, value: Palette.highlight, range: r)
+        let r = tv.selectedRange(), key = "\(a.book)/\(a.num)"
+        let existing = highlights[key] ?? []
+        let overlapping = existing.filter { NSIntersectionRange($0, r).length > 0 }
+        if overlapping.isEmpty {
+            highlights[key] = existing + [r]
+            tv.textStorage?.addAttribute(.backgroundColor, value: Palette.highlight, range: r)
+        } else {
+            highlights[key] = existing.filter { NSIntersectionRange($0, r).length == 0 }
+            for o in overlapping where NSMaxRange(o) <= (tv.textStorage?.length ?? 0) { tv.textStorage?.removeAttribute(.backgroundColor, range: o) }
+        }
         tv.setSelectedRange(NSRange(location: NSMaxRange(r), length: 0))
     }
 
@@ -264,13 +349,65 @@ final class AppModel: ObservableObject {
         if m.kind == "music" { player.playMusic(library.url(path)) }
     }
 
-    func addBookmark() {
-        guard let a = article else { return }
-        let hit = Library.Hit(book: a.book, num: a.num, title: a.title)
-        guard !bookmarks.contains(hit) else { return }
-        bookmarks.append(hit)
-        UserDefaults.standard.set(bookmarks.map { ["book": $0.book, "num": $0.num, "title": $0.title] }, forKey: "Bookmarks")
+    // MARK: bookmarks (CRL32 dialogs 178 "Bookmark Create", 253 "Select Bookmark to find", 254 "… to Delete")
+
+    /// "Enter Name of Bookmark to Create": the current article under a name (default: its title).
+    func setBookmark() {
+        guard let a = article else { NSSound.beep(); return }
+        let alert = NSAlert()
+        alert.messageText = "Enter Name of Bookmark to Create"
+        let field = NSTextField(string: a.title)
+        field.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
+        alert.accessoryView = field
+        alert.addButton(withTitle: "OK"); alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let name = field.stringValue.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { NSSound.beep(); return }
+        bookmarks.removeAll { $0.name == name }
+        bookmarks.append(Bookmark(name: name, hit: Library.Hit(book: a.book, num: a.num, title: a.title)))
         sound("success.wav")
+    }
+
+    func gotoBookmark(_ b: Bookmark) {
+        if panel == .none { panel = .subjects }
+        show(b.hit)
+    }
+
+    func deleteBookmark(_ b: Bookmark) {
+        bookmarks.removeAll { $0 == b }
+        sound("success.wav")
+    }
+
+    /// The bookmark on the desk: a menu to set, go to, or delete bookmarks.
+    func bookmarkMenu() {
+        let menu = NSMenu()
+        menu.addItem(MenuAction.item(article == nil ? "Set Bookmark…" : "Set Bookmark for \u{201C}\(article!.title)\u{201D}…", enabled: article != nil) { [weak self] in self?.setBookmark() })
+        if !bookmarks.isEmpty {
+            menu.addItem(.separator())
+            for b in bookmarks.sorted(by: { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }) {
+                menu.addItem(MenuAction.item(b.name) { [weak self] in self?.gotoBookmark(b) })
+            }
+            menu.addItem(.separator())
+            let del = NSMenuItem(title: "Delete Bookmark", action: nil, keyEquivalent: "")
+            del.submenu = NSMenu()
+            for b in bookmarks { del.submenu?.addItem(MenuAction.item(b.name) { [weak self] in self?.deleteBookmark(b) }) }
+            menu.addItem(del)
+        }
+        MenuAction.popUp(menu)
+    }
+
+    // MARK: trails (CRL32 dialog 304 "Trails List": Delete, Delete All)
+
+    func deleteTrailItem(_ i: Int) {
+        guard trail.indices.contains(i) else { NSSound.beep(); return }
+        trail.remove(at: i)
+        trailSelection = nil
+    }
+
+    func deleteAllTrails() {
+        trail.removeAll()
+        trailSelection = nil
     }
 
     func copyArticle() {
@@ -290,17 +427,65 @@ final class AppModel: ObservableObject {
 
     // MARK: search
 
-    func search() {
+    /// The magnifying glass: with "Search Menu" as the default search type, ask which search to run.
+    func searchMenuOrIndex() {
+        guard searchTypeDefault == "menu" else { fullText = searchTypeDefault == "full"; panel = .index; return }
+        let menu = NSMenu()
+        menu.addItem(MenuAction.item("Quick Subject Search") { [weak self] in self?.fullText = false; self?.panel = .index; self?.search() })
+        menu.addItem(MenuAction.item("Full Text Search") { [weak self] in self?.fullText = true; self?.panel = .index; self?.search() })
+        MenuAction.popUp(menu)
+    }
+
+    /// Search the open books. Typing searches as you go when "Indexing while typing" is on;
+    /// Return (`submit`) always searches, opens the first hit, or reports the failure.
+    func search(submit: Bool = false) {
+        // A submitted search (Return, a Spell Check pick) also changes `query`, and the Index's onChange
+        // then asks for a live search of the same text; don't let that cancel the submitted one.
+        if !submit, query == pendingSubmit { return }
+        pendingSubmit = submit ? query : nil
         searchTask?.cancel()
-        let q = query, full = fullText, lib = library, scope: String? = nil
+        searchFailed = false
+        suggesting = false
+        guard indexing || submit else { return }
+        let q = query, full = fullText, lib = library, scope = Book.all.map(\.id).filter { openBooks.contains($0) }
         searchTask = Task {
-            try? await Task.sleep(for: .milliseconds(120))
+            if !submit { try? await Task.sleep(for: .milliseconds(120)) }
             guard !Task.isCancelled, let lib else { return }
             let r = await Task.detached {
-                full ? (try? lib.search(q, book: scope)) ?? [] : (try? lib.titles(prefix: q, book: scope)) ?? []
+                full ? (try? lib.search(q, books: scope)) ?? [] : (try? lib.titles(prefix: q, books: scope)) ?? []
             }.value
-            if !Task.isCancelled { hits = r }
+            guard !Task.isCancelled else { return }
+            hits = r
+            if submit { pendingSubmit = nil }
+            if submit {
+                if let h = r.first { show(h) } else if !q.trimmingCharacters(in: .whitespaces).isEmpty { searchFailed = true; sound("abort.wav") }
+            }
         }
+    }
+
+    /// Search failure → "Spell Check": list dictionary words close to the query.
+    func spellCheck() {
+        searchFailed = false
+        let words: [String] = query.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+        let word = words.max(by: { $0.count < $1.count }) ?? query
+        hits = library?.suggestions(for: word) ?? []
+        suggesting = true
+        if hits.isEmpty { NSSound.beep() }
+    }
+
+    /// Search failure → "Text Search": run the query as a full-text search instead.
+    func textSearchInstead() {
+        fullText = true
+        search(submit: true)
+    }
+
+    /// Pick a Spell Check suggestion: search for it.
+    func useSuggestion(_ h: Library.Hit) {
+        // End the search field's editing session first: a focused field keeps showing its own text
+        // when `query` changes underneath it.
+        NSApp.keyWindow?.makeFirstResponder(nil)
+        query = h.title
+        search(submit: true)
     }
 
     func sound(_ name: String) {

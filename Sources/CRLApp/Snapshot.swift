@@ -29,6 +29,19 @@ enum Snapshot {
                 if f.count > 1, let b = Book.all.first(where: { $0.id == f[1] }) { model.openTOC(b) }
                 if f.count > 2, let i = Int(f[2]) { model.chooseTOC(i) }
             case "index": model.panel = .index; model.query = parts.count > 1 ? parts[1] : ""; model.search()
+            case "submit": model.panel = .index; model.query = parts.count > 1 ? parts[1] : ""; model.search(submit: true)
+            case "spell": model.panel = .index; model.query = parts.count > 1 ? parts[1] : ""; model.spellCheck()
+            case "pick":
+                // pick:word — Spell Check, then (with the Index on screen) choose the first suggestion
+                model.panel = .index; model.query = parts.count > 1 ? parts[1] : ""; model.spellCheck()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { if let h = model.hits.first { model.useSuggestion(h) } }
+            case "trails":
+                // trails[:book:title,…] — visit articles, then show the Reference Trails panel
+                for spec in (parts.count > 1 ? parts[1] : "").split(separator: ",") {
+                    let f = spec.split(separator: ":").map(String.init)
+                    if f.count == 2, let h = (try? model.library?.titles(prefix: f[1], book: f[0]))?.first { model.show(h) }
+                }
+                model.panel = .trails; model.trailSelection = 1
             case let b?:
                 if let book = Book.all.first(where: { $0.id == b }) {
                     model.open(book)

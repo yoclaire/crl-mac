@@ -300,3 +300,36 @@ final class SubjectCell: NSView {
         (title as NSString).draw(at: NSPoint(x: 20 * s, y: 1 * s), withAttributes: [.font: font, .foregroundColor: NSColor.black])
     }
 }
+
+// MARK: - Pop-up menus
+
+/// Closure-backed NSMenuItems, for the room's pop-up menus (bookmarks, search type).
+@MainActor
+final class MenuAction: NSObject {
+    private let run: () -> Void
+    private static var live: [MenuAction] = []      // NSMenuItem holds its target weakly
+    private static var shown: [MenuAction] = []     // the last menu's actions, kept until the next one
+    private init(_ run: @escaping () -> Void) { self.run = run }
+    @objc private func fire() { run() }
+
+    static func item(_ title: String, enabled: Bool = true, _ run: @escaping () -> Void) -> NSMenuItem {
+        let a = MenuAction(run)
+        live.append(a)
+        let i = NSMenuItem(title: title, action: enabled ? #selector(fire) : nil, keyEquivalent: "")
+        i.target = a
+        i.isEnabled = enabled
+        return i
+    }
+
+    /// Show the menu at the mouse in the key window. Its actions stay alive until the next pop-up,
+    /// however AppKit schedules the chosen item's action.
+    static func popUp(_ menu: NSMenu) {
+        shown = live
+        live = []
+        menu.autoenablesItems = false
+        if let view = NSApp.keyWindow?.contentView ?? NSApp.windows.first(where: \.isVisible)?.contentView {
+            let p = view.convert(view.window?.mouseLocationOutsideOfEventStream ?? .zero, from: nil)
+            menu.popUp(positioning: nil, at: p, in: view)
+        }
+    }
+}

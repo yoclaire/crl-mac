@@ -33,18 +33,18 @@ Open (or allow it in System Settings → Privacy & Security). Copies fetched wit
 
 ```sh
 git clone https://github.com/yoclaire/crl-mac && cd crl-mac
-./scripts/make-app.sh          # downloads the decoded library from the latest release, then builds
+./scripts/make-app.sh          # downloads the decoded library from its release, then builds
 open "dist/Complete Reference Library.app"
 ```
 
 `make-app.sh` embeds the first library it finds: `--library DIR`, else `build/library`, else the app's
-Application Support one, else the release's `CRL-library-<version>.zip` (checked against
-`scripts/library.sha256`). `--download` forces a fresh download.
+Application Support one, else `CRL-library-<version>.zip` from the release named by `LIBRARY_RELEASE` in
+the script (checked against `scripts/library.sha256`). `--download` forces a fresh download.
 
 **From the disc.** With the ISO (and ffmpeg, `brew install ffmpeg`, for the Indeo 3 video, converted
 once during import), `./scripts/make-app.sh --iso "Complete Reference Library (1995)(Mindscape).iso"`
 decodes everything in about 80 seconds. Only needed when the decoders change; publish the new
-`build/library` as the next release's library archive and update `scripts/library.sha256`.
+`build/library` with the next release and update `LIBRARY_RELEASE` and `scripts/library.sha256`.
 `--no-embed` builds an empty app that asks for the disc on first launch.
 
 Command-line equivalents (with Command Line Tools 27.2, add `--build-system native` to `swift build`;

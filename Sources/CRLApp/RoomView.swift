@@ -35,7 +35,10 @@ struct RoomView: View {
                 .frame(width: 640 * s, height: 480 * s)
             ForEach(spec.objects) { o in sprite(o) }
             panels
-            if let tip = model.hover.flatMap({ spec.object($0) }), !tip.tip.isEmpty, model.screen == .room {
+            if let m = model.overlay, model.isFullView(m) {
+                MediaOverlay(media: m, s: s).frame(width: 640 * s, height: 480 * s)
+            }
+            if model.passOverHelp, let tip = model.hover.flatMap({ spec.object($0) }), !tip.tip.isEmpty, model.screen == .room {
                 PassOverHelp(text: tip.tip, s: s).position(x: tipPosition(tip).x * s, y: tipPosition(tip).y * s)
                     .allowsHitTesting(false)
             }
@@ -51,6 +54,7 @@ struct RoomView: View {
     }
 
     func object(at p: CGPoint) -> RoomSpec.Object? {
+        if let m = model.overlay, model.isFullView(m) { return nil }      // a full-view picture covers the room
         let q = CGPoint(x: p.x / s, y: p.y / s)
         if model.panel != .none, Layout.subjectList.insetBy(dx: -2, dy: -2).contains(q) || Layout.article.contains(q) || Layout.combo.contains(q) {
             return nil
@@ -180,7 +184,7 @@ struct ArticlePane: View {
                 } else {
                     Color(nsColor: Palette.panel)
                 }
-                if let m = model.overlay { MediaOverlay(media: m, s: s) }
+                if let m = model.overlay, !model.isFullView(m) { MediaOverlay(media: m, s: s) }
             }
         }
     }
@@ -275,14 +279,32 @@ struct IndexPanel: View {
                 .padding(3 * s)
                 .focused($focused)
                 .onChange(of: model.query) { model.search() }
-                .onSubmit { if let h = model.hits.first { model.show(h) } }
+                .onSubmit { model.search(submit: true) }
             HStack(spacing: 4 * s) {
                 toggle("Quick Subject", !model.fullText) { model.fullText = false; model.search() }
                 toggle("Full Text", model.fullText) { model.fullText = true; model.search() }
             }.padding(.horizontal, 3 * s).padding(.bottom, 3 * s)
+            if model.searchFailed {
+                // CRL32 dialogs 414 / 418: "Quick Search Failed" / "Full Text Search Failed - Choose an Option"
+                VStack(spacing: 3 * s) {
+                    Text(model.fullText ? "Full Text Search Failed" : "Quick Search Failed")
+                        .font(.custom("Arial", size: 9.5 * s)).foregroundStyle(.black)
+                    HStack(spacing: 4 * s) {
+                        PanelButton(title: "Spell Check", s: s) { model.spellCheck() }
+                        if !model.fullText { PanelButton(title: "Text Search", s: s) { model.textSearchInstead() } }
+                        PanelButton(title: "Cancel", s: s) { model.searchFailed = false }
+                    }
+                }.padding(.horizontal, 3 * s).padding(.bottom, 3 * s)
+            }
+            if model.suggesting {
+                Text(model.hits.isEmpty ? "No suggestions" : "Spell Check — did you mean:")
+                    .font(.custom("Arial", size: 9.5 * s)).foregroundStyle(.black).padding(.bottom, 2 * s)
+            }
             SubjectTable(rows: model.hits.enumerated().map { i, h in
                 .init(title: h.title, icon: iconRow(Book.all.first { $0.id == h.book }), tag: i, column: 3)
-            }, selected: nil, scale: s) { i in model.show(model.hits[i]) }
+            }, selected: nil, scale: s) { i in
+                if model.suggesting { model.useSuggestion(model.hits[i]) } else { model.show(model.hits[i]) }
+            }
         }
         .onAppear { focused = true }
     }
@@ -337,16 +359,39 @@ struct ContentsPanel: View {
     }
 }
 
+/// Reference Trails: the articles visited, newest first, with CRL32's Delete and Delete All.
+/// (Bookmarks live on the desk's bookmark, as in the original.)
 struct TrailsPanel: View {
     @EnvironmentObject var model: AppModel
     let s: CGFloat
     var body: some View {
-        let items = model.bookmarks.map { ("★ " + $0.title, $0) } + model.trail.map { ($0.title, $0) }
         PanelFrame(s: s) {
             PanelHeader(title: "Reference Trails", s: s, trailing: { model.panel = .subjects })
-            SubjectTable(rows: items.enumerated().map { i, it in .init(title: it.0, icon: iconRow(Book.all.first { $0.id == it.1.book }), tag: i) },
-                         selected: nil, scale: s) { model.show(items[$0].1) }
+            SubjectTable(rows: model.trail.enumerated().map { i, h in .init(title: h.title, icon: iconRow(Book.all.first { $0.id == h.book }), tag: i) },
+                         selected: model.trailSelection, scale: s) { i in
+                model.trailSelection = i
+                model.show(model.trail[i])
+            }
+            HStack(spacing: 4 * s) {
+                PanelButton(title: "Delete", s: s) { model.trailSelection.map(model.deleteTrailItem) ?? NSSound.beep() }
+                PanelButton(title: "Delete All", s: s) { model.deleteAllTrails() }
+            }.padding(3 * s)
         }
+    }
+}
+
+/// A flat button in the panels' style (CRL32's dialog buttons, drawn in the room).
+struct PanelButton: View {
+    let title: String, s: CGFloat
+    var on = false
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            Text(title).font(.custom("Arial", size: 9.5 * s)).foregroundStyle(.black).lineLimit(1).minimumScaleFactor(0.6)
+                .padding(.horizontal, 2 * s).frame(maxWidth: .infinity, minHeight: 15 * s)
+                .background(Color(nsColor: on ? Palette.selection : Palette.header))
+                .overlay(Rectangle().stroke(Color(nsColor: Palette.frame), lineWidth: max(1, s / 2)))
+        }.buttonStyle(.plain)
     }
 }
 

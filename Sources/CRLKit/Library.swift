@@ -68,6 +68,12 @@ public final class Library: @unchecked Sendable {
 
     /// Full-text search across every book; titles rank first.
     public func search(_ query: String, book: String? = nil, limit: Int = 200) throws -> [Hit] {
+        try search(query, books: book.map { [$0] }, limit: limit)
+    }
+
+    /// Full-text search over the given books (nil = all); titles rank first.
+    public func search(_ query: String, books: [String]?, limit: Int = 200) throws -> [Hit] {
+        let only = books.map { "," + $0.joined(separator: ",") + "," }
         let terms = query.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map { "\"\($0)\"*" }
         guard !terms.isEmpty else { return [] }
         let match = terms.joined(separator: " ")
@@ -77,20 +83,26 @@ public final class Library: @unchecked Sendable {
             SELECT e.book, COALESCE(CASE WHEN e.continuation = 1 THEN e.first END, e.num) AS head, h.title
             FROM ranked JOIN entries e ON e.rowid = ranked.rowid
             JOIN entries h ON h.book = e.book AND h.num = COALESCE(CASE WHEN e.continuation = 1 THEN e.first END, e.num)
-            WHERE (? IS NULL OR e.book = ?)
+            WHERE (? IS NULL OR instr(?, ',' || e.book || ',') > 0)
             GROUP BY e.book, head ORDER BY MIN(ranked.score) LIMIT ?
-            """, match, book, book, limit) {
+            """, match, only, only, limit) {
             Hit(book: $0.string(0)!, num: $0.int(1), title: $0.string(2) ?? "")
         }
     }
 
     /// Entries whose title starts with the prefix, for the Index's type-ahead.
     public func titles(prefix: String, book: String?, limit: Int = 300) throws -> [Hit] {
+        try titles(prefix: prefix, books: book.map { [$0] }, limit: limit)
+    }
+
+    /// Entries whose title starts with the prefix, in the given books (nil = all).
+    public func titles(prefix: String, books: [String]?, limit: Int = 300) throws -> [Hit] {
         let key = prefix.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+        let only = books.map { "," + $0.joined(separator: ",") + "," }
         return try db.rows("""
             SELECT book, num, title FROM entries WHERE continuation = 0 AND title != '' AND sort >= ? AND sort < ?
-            AND (? IS NULL OR book = ?) ORDER BY sort LIMIT ?
-            """, key, key + "\u{10FFFF}", book, book, limit) {
+            AND (? IS NULL OR instr(?, ',' || book || ',') > 0) ORDER BY sort LIMIT ?
+            """, key, key + "\u{10FFFF}", only, only, limit) {
             Hit(book: $0.string(0)!, num: $0.int(1), title: $0.string(2) ?? "")
         }
     }
@@ -100,6 +112,56 @@ public final class Library: @unchecked Sendable {
             MediaRef(name: $0.string(0)!, kind: $0.string(1)!, path: $0.string(2), caption: $0.string(3), label: nil,
                      width: $0.string(4).flatMap(Int.init), height: $0.string(5).flatMap(Int.init))
         }
+    }
+
+    /// Spell Check for a failed search, as CRL32's Quick/Full Text Search failure dialogs offer: dictionary
+    /// headwords within a small edit distance of the word, closest first.
+    public func suggestions(for word: String, limit: Int = 20) -> [Hit] {
+        let fold = { (t: String) in Array(t.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)) }
+        let q = fold(word.trimmingCharacters(in: .whitespaces))
+        guard q.count >= 2 else { return [] }
+        let maxDistance = q.count <= 4 ? 1 : 2
+        var scored: [(d: Int, hit: Hit)] = [], seen = Set<String>()
+        for h in headwords() {
+            let t = fold(h.title)
+            guard abs(t.count - q.count) <= maxDistance, let d = Self.distance(q, t, max: maxDistance), d > 0 || t != q else { continue }
+            guard seen.insert(h.title.lowercased()).inserted else { continue }
+            scored.append((d, h))
+        }
+        return scored.sorted { ($0.d, abs($0.hit.title.count - q.count), $0.hit.title) < ($1.d, abs($1.hit.title.count - q.count), $1.hit.title) }
+            .prefix(limit).map(\.hit)
+    }
+
+    private let headwordLock = NSLock()
+    private var headwordCache: [Hit]?
+    private func headwords() -> [Hit] {
+        headwordLock.lock(); defer { headwordLock.unlock() }
+        if let h = headwordCache { return h }
+        let h = (try? db.rows("SELECT num, title FROM entries WHERE book = 'dictionary' AND continuation = 0 AND title != ''") {
+            Hit(book: "dictionary", num: $0.int(0), title: $0.string(1)!)
+        }) ?? []
+        headwordCache = h
+        return h
+    }
+
+    /// Optimal-string-alignment distance (adjacent swaps count once), or nil once it exceeds `limit`.
+    public static func distance(_ a: [Character], _ b: [Character], max limit: Int) -> Int? {
+        if a == b { return 0 }
+        if a.isEmpty || b.isEmpty { let d = Swift.max(a.count, b.count); return d <= limit ? d : nil }
+        var prev2 = [Int](repeating: 0, count: b.count + 1), prev = Array(0...b.count), cur = prev
+        for i in 1...a.count {
+            cur[0] = i
+            var rowMin = i
+            for j in 1...b.count {
+                let cost = a[i - 1] == b[j - 1] ? 0 : 1
+                cur[j] = Swift.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost)
+                if i > 1, j > 1, a[i - 1] == b[j - 2], a[i - 2] == b[j - 1] { cur[j] = Swift.min(cur[j], prev2[j - 2] + 1) }
+                rowMin = Swift.min(rowMin, cur[j])
+            }
+            if rowMin > limit { return nil }
+            (prev2, prev, cur) = (prev, cur, prev2)
+        }
+        return prev[b.count] <= limit ? prev[b.count] : nil
     }
 
     /// The disc's text help topics in file order (empty for libraries built before schema 2).

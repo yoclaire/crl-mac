@@ -8,7 +8,7 @@ import Foundation
 
 let args = CommandLine.arguments
 func usage() -> Never {
-    print("usage: crltool import <disc.iso> <library-dir> | entry <disc.iso> <book> <n> | search <library-dir> <query> | help <disc.iso>")
+    print("usage: crltool import <disc.iso> <library-dir> | entry <disc.iso> <book> <n> | search <library-dir> <query> | help <disc.iso> | suggest <library-dir> <word>")
     exit(2)
 }
 guard args.count >= 2 else { usage() }
@@ -34,6 +34,9 @@ do {
         for hit in try lib.search(args[3...].joined(separator: " "), limit: 20) {
             print("\(hit.book)\t\(hit.num)\t\(hit.title)")
         }
+    case "suggest" where args.count == 4:
+        let lib = try Library(directory: URL(fileURLWithPath: args[2]))
+        for h in lib.suggestions(for: args[3]) { print(h.title) }
     case "help" where args.count == 3:
         let iso = try ISO9660(url: URL(fileURLWithPath: args[2]))
         for t in try HelpFile.topics(try iso.contents("CRL/CRL32.HLP")) {
@@ -80,6 +83,9 @@ do {
         check(am.count == 1 && am[0].bookCode == 2 && am[0].entry == 7 && am[0].items.map(\.type) == [1, 6]
               && am[0].items[0].file == "ASHE.AVI" && am[0].items[1].filOffset == 4242 && am[0].items[1].label == "Albania",
               "MEDIA.DBS article media, chunked")
+        check(Library.distance(Array("teh"), Array("the"), max: 2) == 1 && Library.distance(Array("kitten"), Array("sitting"), max: 3) == 3
+              && Library.distance(Array("kitten"), Array("sitting"), max: 2) == nil && Library.distance(Array(""), Array("ab"), max: 2) == 2,
+              "spell-check edit distance")
         check(LibraryBuilder.safeName("I0110026.PIC") != nil && LibraryBuilder.safeName("../x.png") == nil
               && LibraryBuilder.safeName("a/b") == nil && LibraryBuilder.safeName("..") == nil, "output names are confined")
     default: usage()
