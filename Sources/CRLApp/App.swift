@@ -71,6 +71,7 @@ struct CRLMacApp: App {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let services = ServiceProvider()
+    func applicationWillFinishLaunching(_ notification: Notification) { Snapshot.preserveSettings() }
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.servicesProvider = services
         NSUpdateDynamicServices()

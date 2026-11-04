@@ -6,6 +6,27 @@ import CRLKit
 /// recording permission.
 @MainActor
 enum Snapshot {
+    /// The app's real preferences as they were at launch. AppModel's settings already go to a scratch
+    /// domain in snapshot runs, but AppKit saves window frames (and AVKit its own keys) to the standard
+    /// domain, so a snapshot run puts that domain back as it found it before quitting.
+    private static var savedSettings: [String: Any]?
+    private static let domain = Bundle.main.bundleIdentifier ?? ProcessInfo.processInfo.processName
+
+    /// Called before any window exists.
+    static func preserveSettings() {
+        guard ProcessInfo.processInfo.environment["CRL_SNAPSHOT"] != nil else { return }
+        savedSettings = UserDefaults.standard.persistentDomain(forName: domain) ?? [:]
+    }
+
+    private static func finish(_ code: Int32) -> Never {
+        if let saved = savedSettings {
+            if saved.isEmpty { UserDefaults.standard.removePersistentDomain(forName: domain) }
+            else { UserDefaults.standard.setPersistentDomain(saved, forName: domain) }
+            UserDefaults.standard.synchronize()
+        }
+        exit(code)
+    }
+
     static func runIfRequested(_ model: AppModel) {
         let env = ProcessInfo.processInfo.environment
         guard let out = env["CRL_SNAPSHOT"] else { return }
@@ -58,10 +79,10 @@ enum Snapshot {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                 let window = parts.first == "quickbar" ? QuickBar.shared.panel : NSApp.windows.first(where: { $0.isVisible && !($0 is NSPanel) })
                 guard let view = window?.contentView,
-                      let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { exit(1) }
+                      let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { finish(1) }
                 view.cacheDisplay(in: view.bounds, to: rep)
                 try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: out))
-                exit(0)
+                finish(0)
             }
         }
     }
