@@ -286,3 +286,49 @@ struct ArticleRenderer {
         }
     }
 }
+
+// MARK: - Text help (CRL32.HLP)
+
+extension ArticleRenderer {
+    /// URL for a help-topic link; the topic title is the whole identifier.
+    static func helpURL(_ title: String) -> URL? {
+        var c = URLComponents(); c.scheme = "crlhelp"; c.path = title
+        return c.url
+    }
+
+    /// Render a help topic body: HelpFile's bold and link markers, tabs on a half-inch grid (WinHelp's
+    /// default), the first paragraph (the topic's heading) larger.
+    static func renderHelp(_ body: String, scale: CGFloat) -> NSAttributedString {
+        let r = ArticleRenderer(book: Book.all[0], scale: scale)
+        let p = NSMutableParagraphStyle()
+        p.defaultTabInterval = 36 * scale; p.tabStops = []
+        p.paragraphSpacingBefore = 2 * scale
+        let out = NSMutableAttributedString()
+        var style = Style(), linkText = "", inLink = false
+        var heading = true
+        func emit(_ s: String, link: URL? = nil) {
+            var st = style; st.link = link
+            if heading { st.bold = true; st.size = 1.3 }
+            var a = r.attrs(st, p)
+            if link != nil { a[.foregroundColor] = blue }
+            out.append(NSAttributedString(string: s, attributes: a))
+        }
+        var run = ""
+        func flush() { if !run.isEmpty { emit(run); run = "" } }
+        for c in body {
+            switch c {
+            case HelpFile.boldStart: flush(); style.bold = true
+            case HelpFile.boldEnd: flush(); style.bold = false
+            case HelpFile.linkStart: flush(); inLink = true; linkText = ""
+            case HelpFile.linkEnd:
+                inLink = false; emit(linkText, link: helpURL(linkText))
+            default:
+                if inLink { linkText.append(c); continue }
+                run.append(c)
+                if heading, c == "\n" { flush(); heading = false }
+            }
+        }
+        flush()
+        return out
+    }
+}

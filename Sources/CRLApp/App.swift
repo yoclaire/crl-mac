@@ -106,7 +106,6 @@ struct WindowConfigurator: NSViewRepresentable {
 struct WelcomeView: View {
     @EnvironmentObject var model: AppModel
     let s: CGFloat
-    @State private var dropping = false
 
     var body: some View {
         VStack(spacing: 18 * s) {
@@ -133,8 +132,8 @@ struct WelcomeView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(dropping ? Color(white: 0.15) : .black)
-        .onDrop(of: [.fileURL], isTargeted: $dropping) { providers in
+        .background(model.droppingDisc ? Color(white: 0.15) : .black)
+        .onDrop(of: [.fileURL], isTargeted: $model.droppingDisc) { providers in
             _ = providers.first?.loadObject(ofClass: URL.self) { url, _ in
                 if let url { Task { @MainActor in model.importDisc(url) } }
             }

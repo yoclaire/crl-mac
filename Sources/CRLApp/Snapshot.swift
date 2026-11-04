@@ -21,6 +21,13 @@ enum Snapshot {
                 if f.count > 2 { model.selectMediaCategory(f[2]) }
                 if f.count > 3, let i = Int(f[3]), i < model.mediaItems.count { model.selectMediaItem(model.mediaItems[i]); model.player.stop() }
             case "hover": model.hover = parts.count > 1 ? parts[1] : nil
+            case "help": model.panel = .help; if parts.count > 1 { model.showHelp(parts[1]) }
+            case "toc":
+                // toc[:book[:node index to choose]]
+                model.panel = .contents
+                let f = scenario.split(separator: ":").map(String.init)
+                if f.count > 1, let b = Book.all.first(where: { $0.id == f[1] }) { model.openTOC(b) }
+                if f.count > 2, let i = Int(f[2]) { model.chooseTOC(i) }
             case "index": model.panel = .index; model.query = parts.count > 1 ? parts[1] : ""; model.search()
             case let b?:
                 if let book = Book.all.first(where: { $0.id == b }) {

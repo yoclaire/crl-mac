@@ -16,7 +16,7 @@ public final class LibraryBuilder {
     public var progress: (String, Double) -> Void = { _, _ in }
     public var ffmpegPath: String? = LibraryBuilder.findFFmpeg()
 
-    public static let schemaVersion = 1
+    public static let schemaVersion = 2   // 2: help_topics, toc
 
     public init(isoURL: URL, output: URL) throws {
         iso = try ISO9660(url: isoURL)
@@ -67,6 +67,9 @@ public final class LibraryBuilder {
             CREATE INDEX entry_media_key ON entry_media(book, num);
             CREATE TABLE categories(name TEXT, kind TEXT, ord INTEGER);
             CREATE TABLE category_items(category TEXT, media TEXT, ord INTEGER);
+            CREATE TABLE help_topics(ord INTEGER PRIMARY KEY, title TEXT, body TEXT);
+            CREATE TABLE toc(book TEXT, ord INTEGER, title TEXT, level INTEGER, first INTEGER, last INTEGER,
+                             PRIMARY KEY (book, ord));
             """)
 
         try buildText(db)
@@ -74,6 +77,7 @@ public final class LibraryBuilder {
         try buildCatalog(db, filIndex: filIndex)
         try buildDiscMedia(db)
         try nameAndGroupMedia(db)
+        try buildHelp(db)
         try buildUI()
 
         try db.prepare("INSERT INTO meta VALUES (?, ?)").run("schema", "\(Self.schemaVersion)")
@@ -92,11 +96,15 @@ public final class LibraryBuilder {
         let insBook = try db.prepare("INSERT INTO books VALUES (?, ?, ?, ?)")
         let ins = try db.prepare("INSERT INTO entries VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
         let fts = try db.prepare("INSERT INTO fts(rowid, title, body) VALUES (?, ?, ?)")
+        let toc = try db.prepare("INSERT INTO toc VALUES (?, ?, ?, ?, ?, ?)")
         var rowid = 0
         for (b, book) in Book.all.enumerated() {
             progress("Reading \(book.title)", Double(b) / Double(Book.all.count) * 0.4)
             let re = try REDB(data: iso.contents("CRL/REFDATA/\(book.file)"))
             try insBook.run(book.id, book.title, re.entryCount, b)
+            for (k, n) in re.tableOfContents(isDictionary: book.id == "dictionary").enumerated() {
+                try toc.run(book.id, k, n.title, n.level, n.first, n.last)
+            }
             try re.allEntries { n, bytes in
                 let s = Markup.decode(bytes)
                 let (title, cont) = Markup.title(s)
@@ -142,26 +150,39 @@ public final class LibraryBuilder {
 
     // MARK: catalogue
 
+    /// CRL32.HLP's text help (the "Text" half of the room's "Text and Video Help"). Bodies keep
+    /// HelpFile's link and bold markers; the app renders them.
+    func buildHelp(_ db: SQLite) throws {
+        progress("Reading the help", 0.96)
+        let add = try db.prepare("INSERT INTO help_topics VALUES (?, ?, ?)")
+        for (k, t) in try HelpFile.topics(try iso.contents("CRL/CRL32.HLP")).enumerated() { try add.run(k, t.title, t.body) }
+    }
+
     func buildCatalog(_ db: SQLite, filIndex: [Int: String]) throws {
         progress("Reading the media catalogue", 0.72)
         try db.exec("BEGIN")
         let link = try db.prepare("INSERT INTO entry_media VALUES (?, ?, ?, ?, ?)")
-        for (entry, items) in MediaCatalog.dictionaryMedia(try iso.contents("CRL/MEDIADB/MEDIA.DBS")) {
-            for (k, it) in items.enumerated() {
-                guard let name = filIndex[it.filOffset] else { continue }
-                try link.run("dictionary", entry, name, it.label, k)
+        let codes = Dictionary(uniqueKeysWithValues: Book.all.compactMap { b in b.mediaCode.map { ($0, b.id) } })
+        // MEDIA.DBS is what CRL32 itself consults for an article's media (all kinds, maps included).
+        var linked = Set<String>()
+        for rec in MediaCatalog.articleMedia(try iso.contents("CRL/MEDIADB/MEDIA.DBS")) {
+            guard let book = codes[rec.bookCode] else { continue }
+            for (k, it) in rec.items.enumerated() {
+                guard let name = it.filOffset.flatMap({ filIndex[$0] }) ?? it.file?.uppercased() else { continue }
+                guard linked.insert("\(book)/\(rec.entry)/\(name)").inserted else { continue }
+                try link.run(book, rec.entry, name, it.label.isEmpty ? nil : it.label, k)
             }
         }
-        let codes = Dictionary(uniqueKeysWithValues: Book.all.compactMap { b in b.mediaCode.map { ($0, b.id) } })
+        // MEDIA.LNK is the reverse index (media → articles) behind the Media Library's Related Articles;
+        // it should agree with DBS, so it only adds links DBS lacks.
         for (name, targets) in MediaCatalog.links(try iso.contents("CRL/MEDIADB/MEDIA.LNK")) {
             for (k, t) in targets.enumerated() {
-                guard let book = codes[t.db] else { continue }
+                guard let book = codes[t.db], linked.insert("\(book)/\(t.entry)/\(name)").inserted else { continue }
                 try link.run(book, t.entry, name, nil, 100 + k)
             }
         }
         let cap = try db.prepare("UPDATE media SET caption = ? WHERE name = ?")
         for (name, c) in MediaCatalog.captions(try iso.contents("CRL/MEDIADB/MEDIA.UTL"), validOffsets: filIndex) { try cap.run(c, name) }
-        try linkMaps(db)
         let cat = try db.prepare("INSERT INTO categories VALUES (?, ?, ?)"), item = try db.prepare("INSERT INTO category_items VALUES (?, ?, ?)")
         for (k, c) in MediaCatalog.categories(try iso.contents("CRL/MEDIADB/MEDIA.CTG")).enumerated() {
             try cat.run(c.name, "picture", k)
@@ -171,75 +192,12 @@ public final class LibraryBuilder {
         try db.exec("COMMIT")
     }
 
-    /// Maps carry no catalogue links (none in DBS/LNK, none in the text), so they are matched by
-    /// name: the 8-character stem (AFGHANIS.MAP) against article titles. This is an inference, not
-    /// recovered behaviour — see docs/FORMATS.md.
-    func linkMaps(_ db: SQLite) throws {
-        let maps = try db.rows("SELECT name FROM media WHERE kind = 'map'") { $0.string(0)! }
-        func key(_ t: String) -> String {
-            t.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil).uppercased().filter { $0.isLetter }
-        }
-        var titles: [(book: String, num: Int, title: String, key: String)] = []
-        for book in ["encyclopedia", "almanac", "dictionary"] {
-            titles += try db.rows("SELECT num, title FROM entries WHERE book = ? AND continuation = 0 AND length(title) < 40", book) {
-                (book, $0.int(0), $0.string(1)!, key($0.string(1)!))
-            }
-        }
-        var byPrefix: [String: [(book: String, num: Int, title: String, key: String)]] = [:]
-        for t in titles where t.key.count >= 4 { byPrefix[String(t.key.prefix(8)), default: []].append(t) }
-        let link = try db.prepare("INSERT INTO entry_media VALUES (?, ?, ?, NULL, ?)")
-        let cap = try db.prepare("UPDATE media SET caption = ? WHERE name = ?")
-        for m in maps {
-            let raw = (m as NSString).deletingPathExtension.uppercased()
-            let stem = key(Self.mapAliases[raw] ?? raw)
-            let alias = Self.mapAliases[raw] != nil
-            guard let cands = byPrefix[String(stem.prefix(8))]?.filter({ !alias || $0.key == stem || $0.key.hasPrefix(stem) }),
-                  !cands.isEmpty else {
-                if let name = Self.mapCaptions[raw] ?? Self.mapAliases[raw] { try cap.run(name, m) }   // unlinked, but still named
-                continue
-            }
-            // Shortest matching title per book ("Afghanistan" over "Afghanistan War").
-            var best: [String: (num: Int, title: String)] = [:]
-            for c in cands where best[c.book].map({ c.title.count < $0.title.count }) ?? true { best[c.book] = (c.num, c.title) }
-            for (book, b) in best { try link.run(book, b.num, m, 50) }
-            if let caption = Self.mapCaptions[raw] ?? Self.mapAliases[raw] ?? best["encyclopedia"]?.title ?? best["almanac"]?.title {
-                try cap.run(caption, m)
-            }
-        }
-    }
-
-    /// Display names where the article title would be ambiguous.
-    static let mapCaptions: [String: String] = [
-        "OKLAHOMA": "Oklahoma City", "PORTLANM": "Portland, Maine", "PORTLANO": "Portland, Oregon", "KANSASCI": "Kansas City",
-        "NEWYORKC": "New York City", "SALTLAKE": "Salt Lake City",
-    ]
-
-    /// Map names that are abbreviations rather than truncations.
-    static let mapAliases: [String: String] = [
-        "MACAU": "Macao", "MALDIVE": "Maldives", "NORKOREA": "Korea, North", "SOUKOREA": "Korea, South",
-        "BOSNHERZ": "Bosnia and Herzegovina", "UK": "United Kingdom", "VATICAN": "Vatican City", "BURKINA": "Burkina Faso",
-        "CAF": "Central African Republic", "EQUAGUIN": "Equatorial Guinea", "GUINBISS": "Guinea-Bissau", "IVORYCOA": "Côte d'Ivoire",
-        "SAOTOMEP": "São Tomé and Príncipe", "SIERRAL": "Sierra Leone", "ANTIBARB": "Antigua and Barbuda", "BRVIRGIS": "British Virgin Islands",
-        "CAYMAN": "Cayman Islands", "DOMREPUB": "Dominican Republic", "NETHANTI": "Netherlands Antilles", "STKITTSN": "Saint Kitts and Nevis",
-        "TURKSCAI": "Turks and Caicos Islands", "FALKISLA": "Falkland Islands", "FRENGUIA": "French Guiana", "KYRGYSTA": "Kyrgyzstan",
-        "FRENPOLY": "French Polynesia", "NMARIANA": "Northern Mariana Islands", "WSAMOA": "Western Samoa", "US": "United States",
-        "ANTARCT": "Antarctica", "UNITEDAE": "United Arab Emirates", "MEMPHIS": "Memphis", "PORTLANM": "Portland",
-        "PORTLANO": "Portland", "STLOUIS": "Saint Louis", "WASHINDC": "Washington, D.C.",
-        "AK": "Alaska", "AL": "Alabama", "AR": "Arkansas", "AZ": "Arizona", "CA": "California", "CO": "Colorado", "CT": "Connecticut",
-        "DE": "Delaware", "FL": "Florida", "GA": "Georgia", "HI": "Hawaii", "IA": "Iowa", "IN": "Indiana", "ID": "Idaho", "IL": "Illinois",
-        "KS": "Kansas", "KY": "Kentucky", "LA": "Louisiana", "MA": "Massachusetts", "MD": "Maryland", "ME": "Maine", "MI": "Michigan",
-        "MN": "Minnesota", "MO": "Missouri", "MS": "Mississippi", "MT": "Montana", "NC": "North Carolina", "ND": "North Dakota",
-        "NE": "Nebraska", "NH": "New Hampshire", "NJ": "New Jersey", "NM": "New Mexico", "NV": "Nevada", "NY": "New York", "OH": "Ohio",
-        "OK": "Oklahoma", "OR": "Oregon", "PA": "Pennsylvania", "RI": "Rhode Island", "SC": "South Carolina", "SD": "South Dakota",
-        "TN": "Tennessee", "TX": "Texas", "UT": "Utah", "VA": "Virginia", "VT": "Vermont", "WA": "Washington", "WI": "Wisconsin",
-        "WV": "West Virginia", "WY": "Wyoming",
-    ]
-
     // MARK: Media Library names and categories
 
-    /// Only photos have authored captions and categories on the disc (MEDIA.UTL / MEDIA.CTG). Everything
-    /// else gets a name and grouping derived from the disc's own data so the Media Library never shows
-    /// raw 8.3 file names:
+    /// MEDIA.UTL holds authored captions for every kind (pictures, maps, videos, animations, music,
+    /// pronunciations) and MEDIA.CTG the photo categories. Items the disc leaves uncaptioned (a few music
+    /// clips and animations) get a name derived from the disc's own data, and kinds without categories
+    /// get a grouping, so the Media Library never shows raw 8.3 file names:
     /// - pronunciations: the word from MEDIA.DBS, grouped A–Z
     /// - music: the first article MEDIA.LNK links it to; 500xxxx = instruments, 60xxx = styles
     /// - video/animation: the linked article whose title matches the file name, else the first link
@@ -249,6 +207,12 @@ public final class LibraryBuilder {
         progress("Indexing the Media Library", 0.955)
         try db.exec("BEGIN")
         let setCaption = try db.prepare("UPDATE media SET caption = ? WHERE name = ? AND (caption IS NULL OR caption = '')")
+        // Videos, animations and music only exist as rows once buildDiscMedia has run, after the catalogue
+        // pass, so apply their MEDIA.UTL captions here, before any name is inferred. (No FIL offsets: the
+        // picture/map captions, which need them, were applied in buildCatalog.)
+        for (name, c) in MediaCatalog.captions(try iso.contents("CRL/MEDIADB/MEDIA.UTL"), validOffsets: [:]) {
+            try setCaption.run(c, name)
+        }
         let addCategory = try db.prepare("INSERT INTO categories VALUES (?, ?, ?)")
         let addItem = try db.prepare("INSERT INTO category_items VALUES (?, ?, ?)")
         var order = try db.rows("SELECT COALESCE(MAX(ord), 0) FROM categories") { $0.int(0) }.first ?? 0

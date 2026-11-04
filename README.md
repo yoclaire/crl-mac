@@ -14,21 +14,41 @@ Information Please Almanac, Roget's II, National Directory, Legal Word Book, Wal
 Reader's Companion to American History, Written Word III, Simpson's Contemporary Quotations),
 ~1,800 photos and maps, ~10,000 spoken pronunciations, 81 videos and animations, 154 music clips.
 
-## Build and run
+## Get the app
 
-Requires macOS 15+, Swift 6 (Command Line Tools are enough). For video, install ffmpeg first
-(`brew install ffmpeg`): the disc's Indeo 3 video is converted once during import.
+Two ways, neither needs the disc. The releases are private to this repository.
+
+**Download and run.** Grab `Complete-Reference-Library-<version>.zip` from the latest release, unzip,
+and open it:
 
 ```sh
-./scripts/make-app.sh --iso "Complete Reference Library (1995)(Mindscape).iso"
+gh release download --repo yoclaire/crl-mac --pattern 'Complete-Reference-Library-*.zip'
+ditto -x -k Complete-Reference-Library-*.zip . && open "Complete Reference Library.app"
+```
+
+The app is ad-hoc signed, so a copy downloaded in a browser is quarantined: the first time, right-click →
+Open (or allow it in System Settings → Privacy & Security). Copies fetched with `gh` aren't quarantined.
+
+**Build from source.** Requires macOS 15+ and Swift 6 (Command Line Tools are enough) plus `gh`:
+
+```sh
+git clone https://github.com/yoclaire/crl-mac && cd crl-mac
+./scripts/make-app.sh          # downloads the decoded library from the latest release, then builds
 open "dist/Complete Reference Library.app"
 ```
 
-Decoding takes about 80 seconds; the app is ~1 GB and needs nothing else afterwards (the ISO can be
-put away). `--library DIR` embeds an already-built library instead; `--no-embed` builds an empty app
-that asks for the disc on first launch and keeps its library in Application Support.
+`make-app.sh` embeds the first library it finds: `--library DIR`, else `build/library`, else the app's
+Application Support one, else the release's `CRL-library-<version>.zip` (checked against
+`scripts/library.sha256`). `--download` forces a fresh download.
 
-Command-line equivalents:
+**From the disc.** With the ISO (and ffmpeg, `brew install ffmpeg`, for the Indeo 3 video, converted
+once during import), `./scripts/make-app.sh --iso "Complete Reference Library (1995)(Mindscape).iso"`
+decodes everything in about 80 seconds. Only needed when the decoders change; publish the new
+`build/library` as the next release's library archive and update `scripts/library.sha256`.
+`--no-embed` builds an empty app that asks for the disc on first launch.
+
+Command-line equivalents (with Command Line Tools 27.2, add `--build-system native` to `swift build`;
+its default build system can't start — `make-app.sh` does this automatically):
 
 ```sh
 swift build -c release

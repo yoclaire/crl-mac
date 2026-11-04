@@ -20,6 +20,12 @@ final class AppModel: ObservableObject {
     @Published var subjects: [Library.Subject] = []
     @Published var selection: Library.Subject?
     @Published var article: Library.Article?
+    /// A text-help topic shown in the view window instead of an article.
+    struct HelpTopic: Equatable { let title: String; let body: String }
+    @Published var helpTopic: HelpTopic?
+    /// Table of Contents panel: the book whose outline is open, and which outline nodes are expanded.
+    @Published var tocBook: Book?
+    @Published var tocExpanded: Set<Int> = []
     @Published var overlay: Library.MediaRef?          // picture/map/video shown over the article pane
     @Published var overlayItems: [Library.MediaRef] = []
 
@@ -39,6 +45,9 @@ final class AppModel: ObservableObject {
     @Published var hover: String?
     @Published var highlights: [String: [NSRange]] = [:]   // Highlighter marks, per article (this session)
     @Published var windowActive = true
+    /// A disc image is being dragged over the welcome screen. Lives here rather than in a view's
+    /// `@State`: SwiftUI's `State` macro plugin ships with Xcode only, so CLT-only builds can't expand it.
+    @Published var droppingDisc = false
     @Published var trail: [Library.Hit] = []
     @Published var bookmarks: [Library.Hit] = []
     @Published var buttonSounds = UserDefaults.standard.object(forKey: "ButtonSounds") as? Bool ?? true {
@@ -119,6 +128,7 @@ final class AppModel: ObservableObject {
 
     private func load(book: String, num: Int, title: String) {
         overlay = nil
+        helpTopic = nil
         player.stop()
         article = try? library?.article(book: book, num: num)
         let hit = Library.Hit(book: book, num: num, title: article?.title ?? title)
@@ -127,8 +137,33 @@ final class AppModel: ObservableObject {
         if trail.count > 100 { trail.removeLast() }
     }
 
-    /// Follow an in-article cross-reference (crl://book/num).
+    /// Open a book's outline in the Table of Contents panel, showing its first two levels.
+    func openTOC(_ book: Book) {
+        tocBook = book
+        tocExpanded = Set((library?.tableOfContents(book: book.id) ?? []).enumerated().filter { $0.element.level == 0 }.map(\.offset))
+    }
+
+    /// Choose outline node `i`: a section toggles open or closed; every node opens its first article.
+    func chooseTOC(_ i: Int) {
+        guard let book = tocBook, let nodes = library?.tableOfContents(book: book.id), nodes.indices.contains(i) else { return }
+        if i + 1 < nodes.count, nodes[i + 1].level > nodes[i].level {
+            if tocExpanded.contains(i) { tocExpanded.remove(i) } else { tocExpanded.insert(i) }
+        }
+        show(Library.Hit(book: book.id, num: nodes[i].first, title: nodes[i].title))
+    }
+
+    /// Show a text-help topic by title in the view window.
+    func showHelp(_ title: String) {
+        guard let t = library?.helpTopics().first(where: { $0.title == title }) else { NSSound.beep(); return }
+        overlay = nil
+        player.stop()
+        article = nil
+        helpTopic = HelpTopic(title: t.title, body: t.body)
+    }
+
+    /// Follow an in-article cross-reference (crl://book/num) or a help link (crlhelp:Title).
     func follow(_ url: URL) {
+        if url.scheme == "crlhelp" { showHelp(URLComponents(url: url, resolvingAgainstBaseURL: false)?.path ?? ""); return }
         guard url.scheme == "crl", let book = url.host, let num = Int(url.lastPathComponent) else { return }
         show(Library.Hit(book: book, num: num, title: ""))
     }

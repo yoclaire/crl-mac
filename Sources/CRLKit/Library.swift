@@ -102,6 +102,20 @@ public final class Library: @unchecked Sendable {
         }
     }
 
+    /// The disc's text help topics in file order (empty for libraries built before schema 2).
+    /// Bodies carry `HelpFile`'s link and bold markers.
+    public func helpTopics() -> [(title: String, body: String)] {
+        (try? db.rows("SELECT title, body FROM help_topics ORDER BY ord") { ($0.string(0)!, $0.string(1)!) }) ?? []
+    }
+
+    /// A book's Table of Contents outline (pre-order; empty for books without one, or for libraries
+    /// built before schema 2).
+    public func tableOfContents(book: String) -> [REDB.TOCNode] {
+        (try? db.rows("SELECT title, level, first, last FROM toc WHERE book = ? ORDER BY ord", book) {
+            REDB.TOCNode(title: $0.string(0)!, level: $0.int(1), first: $0.int(2), last: $0.int(3))
+        }) ?? []
+    }
+
     /// Media Library categories for one media kind. Photo categories are alphabetical with
     /// "Other Pictures" last; derived groupings (map regions, A–Z) keep their build order.
     public func categories(kind: String) throws -> [String] {

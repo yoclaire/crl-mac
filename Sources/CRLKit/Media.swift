@@ -99,34 +99,74 @@ public enum MediaFile {
 /// The Trio Systems C-Index media catalogue (MEDIA.DBS/.LNK/.UTL/.CTG).
 /// Records are found by scanning for self-validating layouts rather than walking the B-tree.
 public enum MediaCatalog {
-    public struct Item: Sendable { public let kind: UInt8; public let label: String; public let filOffset: Int }
+    /// One media item attached to an article. Pictures, pronunciations and maps are MEDIA.FIL records
+    /// (`filOffset`); videos, music and animations are disc files (`file`, e.g. `ASHE.AVI`).
+    public struct Item: Sendable {
+        public let type: Int            // 0 picture, 1 video, 2 pronunciation, 3 music, 4 animation, 6 map
+        public let label: String
+        public let filOffset: Int?
+        public let file: String?
+    }
 
-    /// MEDIA.DBS: AHD dictionary entry → pictures (kind 0) and pronunciations (kind 2).
-    public static func dictionaryMedia(_ d: Data) -> [Int: [Item]] {
-        var out: [Int: [Item]] = [:]
-        var i = 0
-        while i + 23 < d.count {
+    /// MEDIA.DBS: the original's per-article media index, for every book that has media.
+    ///
+    /// CRL32 looks an article up by exact key (`FUN_004191ad` → `FUN_0041ac8f`): key type = book code + 1,
+    /// key = `keyType << 28 | entry`. Records are `L, keyType, chunk, u32 entry, u32 key`, then a blob
+    /// `u8 counts[7], u32 blobLen (= 11 + items), items grouped by type 0…6`: types 0, 2, 5, 6 are 56 bytes
+    /// `{u8 type, char caption[51], u32 MEDIA.FIL offset}`, types 1, 3, 4 are 66 bytes
+    /// `{u8 type, char caption[51], char file[14]}`. A blob too big for one record is split into chunks
+    /// (`chunk` low bits = index, bit 7 = last), like MEDIA.CTG. The counts enable the room's media
+    /// objects; the items, in stored order, are what each object shows.
+    public static func articleMedia(_ d: Data) -> [(bookCode: Int, entry: Int, items: [Item])] {
+        var chunks: [Int: [Int: Data]] = [:], last: [Int: Int] = [:]
+        var i = 1
+        while i + 11 < d.count {
             defer { i += 1 }
-            guard d.u8(i + 1) == 1, d.u8(i + 2) == 0x80 else { continue }
-            let n = Int(d.u8(i)) + 1
-            guard n >= 78, (n - 22) % 56 == 0, i + n <= d.count else { continue }
-            let entry = Int(d.le32(i + 3))
-            let counts = Int(d.le16(i + 11)) + Int(d.le16(i + 13)) + Int(d.le16(i + 15))
-            guard Int(d.le32(i + 18)) == n - 11, counts == (n - 22) / 56, out[entry] == nil else { continue }
-            out[entry] = (0..<counts).map { k in
-                let o = i + 22 + 56 * k
-                return Item(kind: d.u8(o), label: d.cString(o + 1, max: 51), filOffset: Int(d.le32(o + 52)))
+            let kt = Int(d.u8(i))
+            guard kt > 0, kt < 16, isLeafNode(d, at: i) else { continue }
+            let entry = Int(d.le32(i + 2)), key = Int(d.le32(i + 6))
+            guard key >> 28 == kt, key & 0xFF_FFFF == entry else { continue }
+            let flag = Int(d.u8(i + 1)), L = Int(d.u8(i - 1))
+            let start = i + 10, end = i - 1 + L + 1
+            guard end > start, end <= d.count else { continue }
+            let index = flag & 0x7F
+            if chunks[key, default: [:]][index] == nil { chunks[key, default: [:]][index] = d.sub(start, end - start) }
+            if flag & 0x80 != 0, last[key] == nil { last[key] = index }
+        }
+        var out: [(bookCode: Int, entry: Int, items: [Item])] = []
+        for (key, n) in last.sorted(by: { $0.key < $1.key }) {
+            guard let parts = chunks[key], (0...n).allSatisfy({ parts[$0] != nil }) else { continue }
+            let blob = (0...n).reduce(Data()) { $0 + parts[$1]! }
+            guard blob.count >= 11 else { continue }
+            let counts = (0..<7).map { Int(blob.u8($0)) }
+            let size = { (t: Int) in [0, 2, 5, 6].contains(t) ? 56 : 66 }
+            let declared = Int(blob.le32(7))
+            guard declared == 11 + counts.enumerated().reduce(0, { $0 + $1.element * size($1.offset) }), declared <= blob.count else { continue }
+            var items: [Item] = [], o = 11
+            for (t, c) in counts.enumerated() {
+                for _ in 0..<c {
+                    let label = blob.cString(o + 1, max: 51)
+                    if size(t) == 56 { items.append(Item(type: t, label: label, filOffset: Int(blob.le32(o + 52)), file: nil)) }
+                    else { items.append(Item(type: t, label: label, filOffset: nil, file: blob.cString(o + 52, max: 14))) }
+                    o += size(t)
+                }
             }
+            out.append(((key >> 28) - 1, key & 0xFF_FFFF, items))
         }
         return out
     }
 
-    /// Records shaped `L, 01 80, u32 0, NAME.EXT\0, …`; yields (name, offset after the NUL, L).
-    static func namedRecords(_ d: Data, extensions: Set<String>, _ body: (String, Int, Int) -> Void) {
+    /// Records shaped `L, type, 80, u32 0, NAME.EXT\0, …`; yields (name, offset after the NUL, L).
+    /// `type` is the C-Index key type (MEDIA.UTL: 1 picture, 2 video, 3 pronunciation, 4 music,
+    /// 5 animation, 7 map). `leafOnly` skips B-tree index nodes, whose copies of a key carry a child
+    /// node pointer instead of the record's data.
+    static func namedRecords(_ d: Data, extensions: Set<String>, types: Set<UInt8> = [1], leafOnly: Bool = false,
+                             _ body: (String, Int, Int) -> Void) {
         var i = 1
         while i + 8 < d.count {
             defer { i += 1 }
-            guard d.u8(i) == 1, d.u8(i + 1) == 0x80, d.le32(i + 2) == 0 else { continue }
+            guard types.contains(d.u8(i)), d.u8(i + 1) == 0x80, d.le32(i + 2) == 0,
+                  !leafOnly || isLeafNode(d, at: i) else { continue }
             var e = i + 6
             while e < d.count, e < i + 20, d.u8(e) != 0 { e += 1 }
             let name = d.cString(i + 6, max: 13)
@@ -148,27 +188,41 @@ public enum MediaCatalog {
         return out
     }
 
-    /// MEDIA.UTL: picture/map name → caption. Stale B-tree copies carry garbage after the name, so a
-    /// caption only counts when its MEDIA.FIL offset points at the record of the same name.
+    /// MEDIA.UTL: media file name → authored caption, for every kind the Media Library lists
+    /// (`u32, caption`). Pictures and maps carry their MEDIA.FIL offset in the u32, so their caption
+    /// only counts when that offset points at the record of the same name; for the other kinds the
+    /// u32 is 0 or unrelated and the leaf-node check is the guard.
     public static func captions(_ d: Data, validOffsets: [Int: String]) -> [String: String] {
         var out: [String: String] = [:]
-        namedRecords(d, extensions: ["PIC", "MAP"]) { name, p, _ in
-            guard out[name] == nil, p + 4 < d.count, validOffsets[Int(d.le32(p))] == name else { return }
-            out[name] = d.cString(p + 4, max: 120)
+        namedRecords(d, extensions: ["PIC", "MAP", "AVI", "WAV", "MID", "ANI"], types: [1, 2, 3, 4, 5, 7], leafOnly: true) { name, p, _ in
+            guard out[name] == nil, p + 4 < d.count else { return }
+            if name.hasSuffix(".PIC") || name.hasSuffix(".MAP") { guard validOffsets[Int(d.le32(p))] == name else { return } }
+            let c = d.cString(p + 4, max: 120).trimmingCharacters(in: .whitespaces)
+            if !c.isEmpty { out[name] = c }
         }
         return out
+    }
+
+    /// C-Index files are a 1 KB file header followed by 4 KB B-tree nodes; each node's `u16` at +12 is
+    /// its level (0 = leaf). Index nodes repeat leaf keys in the same `L, 01, chunk, u32 0, key\0` shape
+    /// but follow them with a `u32` child node instead of data, so a scan must skip them.
+    static let nodeBase = 0x400, nodeSize = 4096
+    static func isLeafNode(_ d: Data, at i: Int) -> Bool {
+        guard i >= nodeBase else { return false }
+        let node = nodeBase + (i - nodeBase) / nodeSize * nodeSize
+        return node + 14 <= d.count && d.le16(node + 12) == 0
     }
 
     /// MEDIA.CTG: gallery category → picture names.
     /// Records are `L, 01, chunk, u32 0, name\0, payload`; `chunk` bit 7 marks the last chunk and the low
     /// bits its index. Payloads concatenate to `u32 count` + `count × char[14]` names, and later chunks
-    /// may split a name, so the stream is rebuilt before parsing.
+    /// may split a name, so the stream is rebuilt before parsing. Only leaf nodes hold payloads.
     public static func categories(_ d: Data) -> [(name: String, pictures: [String])] {
         var chunks: [String: [Int: Data]] = [:], last: [String: Int] = [:], order: [String] = []
         var i = 1
         while i + 8 < d.count {
             defer { i += 1 }
-            guard d.u8(i) == 1, d.le32(i + 2) == 0 else { continue }
+            guard d.u8(i) == 1, d.le32(i + 2) == 0, isLeafNode(d, at: i) else { continue }
             let flag = Int(d.u8(i + 1)), L = Int(d.u8(i - 1))
             let name = d.cString(i + 6, max: 41)
             guard name.count >= 2, !name.hasPrefix("@"), name.allSatisfy({ $0.isASCII && ($0.isLetter || " ./'&-".contains($0)) }) else { continue }

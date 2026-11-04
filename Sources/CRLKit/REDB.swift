@@ -124,23 +124,84 @@ public final class REDB {
 }
 
 /// The ten titles on the disc, with the media-catalogue db codes recovered from MEDIA.LNK.
+// MARK: - Table of Contents
+
+extension REDB {
+    /// One line of a book's Table of Contents outline: pre-order, nesting given by `level` alone
+    /// (0 = the book itself). The node covers articles `first...last`.
+    public struct TOCNode: Sendable, Hashable { public let title: String; public let level: Int; public let first: Int; public let last: Int }
+
+    /// Sub-file directory `(type, header offset)` and a sub-file's section directory
+    /// `{u16 id, u32 offset (rel. header), u32 record size, u16 count, u32 size}`, all big-endian.
+    func subfileHeaders() -> [(type: Int, header: Int)] {
+        let n = Int(data.be16(0x316)), dir = Int(data.be32(0x318))
+        return (0..<n).map { (Int(data.be16(dir + 12 * $0)), Int(data.be32(dir + 12 * $0 + 4))) }
+    }
+    func sectionTable(_ hdr: Int) -> [Int: (offset: Int, recordSize: Int, count: Int, size: Int)] {
+        var out: [Int: (offset: Int, recordSize: Int, count: Int, size: Int)] = [:]
+        let n = Int(data.be16(hdr + 0x50)), dir = hdr + Int(data.be32(hdr + 0x52))
+        for i in 0..<n {
+            let r = dir + 16 * i
+            out[Int(data.be16(r))] = (hdr + Int(data.be32(r + 2)), Int(data.be32(r + 6)), Int(data.be16(r + 10)), Int(data.be32(r + 12)))
+        }
+        return out
+    }
+
+    /// The outline CRL32 shows under "Display Table of Contents" (recovered from REWIN32.DLL
+    /// `FUN_1001aae2` and `_REstrtab@12`, and CRL32 `FUN_00403e61`). Nodes: section 0x28 of the entry
+    /// sub-file, 16-byte records `{u16 title id, u16 level, u16 inTOC, u32 first, u32 last, u16 next}`.
+    /// Titles: string table 3 in the sub-file holding sections 0x122 (sorted 8-byte index
+    /// `{u16 table, u16 index, u16 offset, u16}`) and 0x12c (NUL-terminated cp1252 pool). Empty when the
+    /// book has no outline. CRL32 hides a few reference appendices by title prefix; so does this.
+    public func tableOfContents(isDictionary: Bool = false) -> [TOCNode] {
+        let files = subfileHeaders()
+        guard let entryHeader = files.first(where: { $0.type == 1 })?.header,
+              let nodes = sectionTable(entryHeader)[0x28], nodes.recordSize == 16, nodes.count > 0,
+              nodes.offset + 16 * nodes.count <= data.count else { return [] }
+        var titles: [Int: String] = [:]
+        for f in files where f.type != 1 {
+            let s = sectionTable(f.header)
+            guard let index = s[0x122], let pool = s[0x12c], pool.offset + pool.size <= data.count else { continue }
+            for k in 0..<index.count {
+                let r = index.offset + 8 * k
+                guard Int(data.be16(r)) == 3 else { continue }
+                let o = Int(data.be16(r + 4))
+                guard o < pool.size else { continue }
+                var e = pool.offset + o
+                while e < pool.offset + pool.size, data.u8(e) != 0 { e += 1 }
+                titles[Int(data.be16(r + 2))] = String(data: data.sub(pool.offset + o, e - pool.offset - o), encoding: .windowsCP1252)
+            }
+            break
+        }
+        let hidden = ["ad-", "od-", "Two Year", "Four Year"] + (isDictionary ? ["Indo-"] : [])
+        var out: [TOCNode] = []
+        for k in 0..<nodes.count {
+            let r = nodes.offset + 16 * k
+            guard data.be16(r + 4) != 0, let title = titles[Int(data.be16(r))],
+                  !hidden.contains(where: { title.hasPrefix($0) }) else { continue }
+            out.append(TOCNode(title: title, level: Int(data.be16(r + 2)), first: Int(data.be32(r + 6)), last: Int(data.be32(r + 10))))
+        }
+        return out
+    }
+}
+
 public struct Book: Sendable, Hashable, Identifiable {
     public let id: String          // stable key used in the library database
     public let file: String
     public let title: String
     public let spine: String       // room object name in spec/room.json
-    public let mediaCode: Int?     // db code used by MEDIA.LNK / MEDIA.DBS
+    public let mediaCode: Int?     // CRL32 book code (table at 0x49b0d8), used by MEDIA.LNK / MEDIA.DBS
 
     public static let all: [Book] = [
         Book(id: "dictionary", file: "REN3F500.DAT", title: "American Heritage Dictionary", spine: "dictionary", mediaCode: 0),
         Book(id: "encyclopedia", file: "RENEF420.DAT", title: "Concise Columbia Encyclopedia", spine: "encyclopedia", mediaCode: 4),
         Book(id: "almanac", file: "RENAP421.DAT", title: "Information Please Almanac", spine: "almanac", mediaCode: 2),
-        Book(id: "thesaurus", file: "RENTF330.DAT", title: "Roget's II Thesaurus", spine: "thesaurus", mediaCode: nil),
-        Book(id: "directory", file: "RENND401.DAT", title: "National Directory", spine: "directory", mediaCode: nil),
-        Book(id: "legal", file: "RENLW442.DAT", title: "The Legal Word Book", spine: "legal", mediaCode: nil),
-        Book(id: "wallstreet", file: "RENWS411.DAT", title: "Wall Street Words", spine: "wallstreet", mediaCode: nil),
+        Book(id: "thesaurus", file: "RENTF330.DAT", title: "Roget's II Thesaurus", spine: "thesaurus", mediaCode: 1),
+        Book(id: "directory", file: "RENND401.DAT", title: "National Directory", spine: "directory", mediaCode: 8),
+        Book(id: "legal", file: "RENLW442.DAT", title: "The Legal Word Book", spine: "legal", mediaCode: 9),
+        Book(id: "wallstreet", file: "RENWS411.DAT", title: "Wall Street Words", spine: "wallstreet", mediaCode: 6),
         Book(id: "history", file: "RENRC420.DAT", title: "Reader's Companion to American History", spine: "history", mediaCode: 7),
-        Book(id: "style", file: "RENWW421.DAT", title: "The Written Word III", spine: "style", mediaCode: nil),
-        Book(id: "quotes", file: "RENQF410.DAT", title: "Simpson's Contemporary Quotations", spine: "quotes", mediaCode: nil),
+        Book(id: "style", file: "RENWW421.DAT", title: "The Written Word III", spine: "style", mediaCode: 5),
+        Book(id: "quotes", file: "RENQF410.DAT", title: "Simpson's Contemporary Quotations", spine: "quotes", mediaCode: 3),
     ]
 }

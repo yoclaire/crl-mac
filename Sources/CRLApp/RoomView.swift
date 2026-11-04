@@ -169,9 +169,12 @@ struct ArticlePane: View {
     let s: CGFloat
     var body: some View {
         PanelFrame(s: s) {
-            PanelHeader(title: model.overlay.map { $0.caption ?? $0.label ?? $0.name } ?? model.article?.title ?? "", s: s, dark: true)
+            PanelHeader(title: model.overlay.map { $0.caption ?? $0.label ?? $0.name } ?? model.article?.title ?? model.helpTopic?.title ?? "",
+                        s: s, dark: true)
             ZStack {
-                if let a = model.article, let book = Book.all.first(where: { $0.id == a.book }) {
+                if let h = model.helpTopic, model.article == nil {
+                    ArticleTextView(text: ArticleRenderer.renderHelp(h.body, scale: s), scale: s, highlights: []) { model.follow($0) }
+                } else if let a = model.article, let book = Book.all.first(where: { $0.id == a.book }) {
                     ArticleTextView(text: ArticleRenderer(book: book, scale: s).render(a), scale: s,
                                     highlights: model.highlights["\(a.book)/\(a.num)"] ?? []) { model.follow($0) }
                 } else {
@@ -299,11 +302,38 @@ struct ContentsPanel: View {
     let s: CGFloat
     var body: some View {
         PanelFrame(s: s) {
-            PanelHeader(title: "Table of Contents", s: s)
-            SubjectTable(rows: Book.all.enumerated().map { .init(title: $1.title, icon: iconRow($1), tag: $0, column: 2) }, selected: nil, scale: s) {
-                model.open(Book.all[$0])
+            if let book = model.tocBook {
+                let nodes = model.library?.tableOfContents(book: book.id) ?? []
+                let rows = Self.visible(nodes, expanded: model.tocExpanded)
+                PanelHeader(title: "Table of Contents", s: s, trailing: { model.tocBook = nil })
+                SubjectTable(rows: rows.map { i in
+                    let n = nodes[i], parent = i + 1 < nodes.count && nodes[i + 1].level > n.level
+                    let mark = parent ? (model.tocExpanded.contains(i) ? "▾ " : "▸ ") : "   "
+                    return .init(title: String(repeating: "    ", count: n.level) + mark + n.title, icon: iconRow(book), tag: i)
+                }, selected: nil, scale: s) { model.chooseTOC($0) }
+            } else {
+                // CRL32 offers an outline for these four books only (flag table DAT_0049b108); the Legal
+                // Word Book also carries one on the disc, but the original never showed it.
+                let offered: Set = ["dictionary", "almanac", "quotes", "style"]
+                let books = Book.all.filter { offered.contains($0.id) && !(model.library?.tableOfContents(book: $0.id).isEmpty ?? true) }
+                PanelHeader(title: "Table of Contents", s: s)
+                SubjectTable(rows: books.enumerated().map { .init(title: $1.title, icon: iconRow($1), tag: $0, column: 2) }, selected: nil, scale: s) {
+                    model.openTOC(books[$0])
+                }
             }
         }
+    }
+
+    /// Indices of the nodes to list: a node is shown when every ancestor is expanded.
+    static func visible(_ nodes: [REDB.TOCNode], expanded: Set<Int>) -> [Int] {
+        var out: [Int] = [], collapsedBelow: Int?
+        for (i, n) in nodes.enumerated() {
+            if let c = collapsedBelow { if n.level > c { continue } else { collapsedBelow = nil } }
+            out.append(i)
+            let parent = i + 1 < nodes.count && nodes[i + 1].level > n.level
+            if parent, !expanded.contains(i) { collapsedBelow = n.level }
+        }
+        return out
     }
 }
 
@@ -325,10 +355,15 @@ struct HelpPanel: View {
     let s: CGFloat
     var body: some View {
         let clips = (try? model.library?.media(kind: "help")) ?? []
+        // Contents first (where WinHelp opens), then the other text topics, then the video help.
+        let all = (model.library?.helpTopics() ?? []).map(\.title)
+        let topics = all.filter { $0 == "Contents" } + all.filter { $0 != "Contents" }
         PanelFrame(s: s) {
             PanelHeader(title: "Text and Video Help", s: s, trailing: { model.panel = .subjects })
-            SubjectTable(rows: clips.indices.map { .init(title: "Video Help \($0 + 1)", icon: iconRow(media: "video"), tag: $0) }, selected: nil, scale: s) {
-                model.present([clips[$0]])
+            SubjectTable(rows: topics.indices.map { .init(title: topics[$0], icon: iconRow(media: "text"), tag: $0) }
+                         + clips.indices.map { .init(title: "Video Help \($0 + 1)", icon: iconRow(media: "video"), tag: topics.count + $0) },
+                         selected: nil, scale: s) {
+                if $0 < topics.count { model.showHelp(topics[$0]) } else { model.present([clips[$0 - topics.count]]) }
             }
         }
     }

@@ -112,25 +112,59 @@ reconstructs them from an `APP1` segment `"PIC\0", u8 flag, u8 Ql, u8 Qc, u8 ?`
 ## Media catalogue (`MEDIA.DBS/.LNK/.UTL/.CTG`)
 
 Trio Systems C-Index files ("(c) Copyright Trio Systems 1983-1990" in `CRL32.EXE`; opened by
-`FUN_0044dae4`). Records are `u8 L, 01 80, …` spanning `L+1` bytes, stored in B-tree pages; the
-readers in `tools/mediadb.py` scan for self-validating records instead of walking the tree, and
-reject stale/index copies with a length check.
+`FUN_0044dae4`). Layout: a 1 KB file header (`VALIDAT1` signature interleaved with u32s), then
+**4 KB B-tree nodes**; a node's `u16` at +12 is its level (0 = leaf). Records are
+`u8 L, u8 key type, u8 chunk, u32 0, key\0, payload`, spanning `L+1` bytes. **Index nodes** (level ≥ 1)
+repeat leaf keys in exactly the same shape but follow the key with a `u32` child node number instead of
+the data — scanners must skip them (`MediaCatalog.isLeafNode`). Node counts: CTG 94 leaf + 1 index,
+UTL 415 + 6, DBS 622 + 6, LNK 106 + 1. The readers scan leaf records rather than walking the tree.
 
-- **DBS** (12,588 records) — dictionary media. `u32 ahd_entry, u32 link (db<<24 | entry),
-  u16 n_pictures, u16 n_sounds, u16, u8, u32 varlen (= L+1-11)`, then 56-byte items
-  `{u8 type (0 picture, 2 sound), char label[51], u32 MEDIA.FIL record offset}`.
-  Pictures and pronunciations of American Heritage Dictionary entries; all 13,455 offsets land on record starts.
+- **DBS** (16,138 records) — **the per-article media index CRL32 consults** (`FUN_004191ad` →
+  `FUN_0041ac8f` → C-Index exact find), for every book with media. Key type = book code + 1, key =
+  `keyType << 28 | entry` (book codes, table at `0x49b0d8`: 0 Dictionary, 1 Thesaurus, 2 Almanac,
+  3 Quotations, 4 Encyclopedia, 5 Written Word, 6 Wall Street, 7 American History, 8 Directory, 9 Legal).
+  Record `L, keyType, chunk, u32 entry, u32 key`, blob `u8 counts[7], u32 blobLen (= 11 + items)`, then
+  items grouped by type: 0 picture / 2 pronunciation / 6 map are 56 bytes `{u8 type, char caption[51],
+  u32 MEDIA.FIL offset}`, 1 video / 3 music / 4 animation are 66 bytes `{u8 type, char caption[51],
+  char file[14]}` (type 5 unused). 240 large blobs are split into chunks like CTG's. The counts enable
+  the room's media objects; one map is shown directly, several open a caption menu. Records per key type:
+  1 Dictionary 13,127 · 2 Thesaurus 1 · 3 Almanac 814 · 5 Encyclopedia 1,866 · 7 Wall Street 3 ·
+  8 American History 327; 317 of the 318 maps are referenced.
 - **LNK** (212 records) — `MID`/`AVI`/`ANI` file → `[(u32 db_code, u32 entry)]`, after a 7-byte pad.
   db codes: 0 = AHD, 2 = Almanac, 4 = Columbia, 7 = Reader's Companion.
-- **UTL** (1,501 records) — picture name → `u32 MEDIA.FIL offset`, caption. Stale B-tree copies hold
-  garbage after the name; a caption counts only when its offset lands on the record of the same name.
+- **UTL** — the Media Library's authored captions, one key type per kind; payload `u32, caption`:
+
+  | key type | key | records | u32 |
+  |---|---|---|---|
+  | 1 | `NAME.PIC` picture | 1,501 | MEDIA.FIL offset |
+  | 2 | `NAME.AVI` video | 50 | 0 |
+  | 3 | `NNNNN.WAV` pronunciation (the word) | 9,964 | (unrelated) |
+  | 4 | `NNNNNNN.MID` music | 140 of 154 | 0 |
+  | 5 | `NAME.ANI` animation | 22 of 25 | 0 |
+  | 7 | `NAME.MAP` map ("North Korea", "Albuquerque, NM") | 318 | MEDIA.FIL offset |
+
+  For pictures and maps a caption counts only when its offset lands on the FIL record of the same name.
 - **CTG** — gallery categories. Records are `L, 01, chunk, u32 0, name\0, payload`; `chunk` bit 7 =
   last chunk, low bits = index (`0x80` = single chunk). Payloads concatenate to `u32 count` +
-  `count × char[14]` names (a name may straddle chunks). 56 of the 63 categories in
-  `@@@_CATG_NAMES` reassemble (1,079 pictures); the rest have broken chains (TODO).
-- **Maps**: the 318 `*.MAP` records are referenced by no catalogue file and no article text. The
-  importer links them **by name** (8-character stem vs. article titles, plus an alias table for
-  abbreviations such as `NORKOREA`, `CAF` and state codes); 317 of 318 link. This is inferred, not recovered.
+  `count × char[14]` names (a name may straddle chunks). All 63 categories in `@@@_CATG_NAMES`
+  reassemble once the index node's key copies are skipped (the 7 that failed before — Business Leaders,
+  Entertainers, Foreign Political Figures, Literature/Writers, Places, Scientists/Doctors,
+  Tools/Instruments — each had an index-node copy of one chunk ahead of the leaf copy).
+- **Maps** are linked through DBS like every other medium (type 6). (Earlier versions of the
+  importer matched map names against article titles; that heuristic is gone.)
+
+## Text help (`CRL32.HLP`)
+
+WinHelp 3.1 (`|SYSTEM` minor 21, flags 0: uncompressed, no `|Phrases`). Internal files: `|CONTEXT
+|CTXOMAP |FONT |KWBTREE |KWDATA |KWMAP |SYSTEM |TOPIC |TTLBTREE`. `|TOPIC` is 4 KB blocks with a 12-byte
+header each; topic links run across block boundaries. Link `{i32 size, i32 len2, i32 prev, i32 next,
+i32 len1, u8 type}`: type 2 opens a topic (title = first string of LinkData2), type 0x20 is a paragraph
+record: compressed `topicSize`, `topicLength`, two bytes, `u16 id`, `u16 bits` + the fields `bits` selects
+(tab count is a *signed, biased* compressed short), then commands until `0xFF`, each consuming the next
+NUL-separated text segment: `0x80 u16` font, `0x81` line break, `0x82` paragraph end, `0x83` tab,
+`0x86–88` picture, `0x89` hotspot end, `0xE0–E7 u32` jump/popup, `0xC8/0xCC` macro. Symbol-font
+runs carry ©/®/™ as 0xD3/0xE2/0xD4. 16 topics, 12 jumps — every jump's text is its target's title.
+`HelpFile.swift` decodes it into `help_topics`.
 
 ## Video (`VIDEOS/*.AVI`, `HELP/*.AVI`, `ANIMATE/*.ANI`)
 
