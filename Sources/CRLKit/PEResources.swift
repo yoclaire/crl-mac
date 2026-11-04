@@ -49,8 +49,8 @@ public enum PEResources {
     }
 
     /// Turn an RT_BITMAP DIB into PNG bytes. Magenta (255,0,255) becomes transparent, as the
-    /// original sprite blitter treats it.
-    public static func png(fromDIB dib: Data, keyMagenta: Bool = true) throws -> Data {
+    /// original sprite blitter treats it; `key` names a different colour to drop instead.
+    public static func png(fromDIB dib: Data, keyMagenta: Bool = true, key: (UInt8, UInt8, UInt8)? = nil) throws -> Data {
         let headerSize = Int(dib.le32(0)), bpp = Int(dib.le16(14))
         var colors = Int(dib.le32(32))
         if colors == 0 && bpp <= 8 { colors = 1 << bpp }
@@ -68,8 +68,8 @@ public enum PEResources {
         let ctx = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4, space: cs,
                             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
         ctx.draw(img, in: CGRect(x: 0, y: 0, width: w, height: h))
-        if keyMagenta {
-            for i in stride(from: 0, to: px.count, by: 4) where px[i] == 255 && px[i + 1] == 0 && px[i + 2] == 255 {
+        if let k = key ?? (keyMagenta ? (255, 0, 255) : nil) {
+            for i in stride(from: 0, to: px.count, by: 4) where px[i] == k.0 && px[i + 1] == k.1 && px[i + 2] == k.2 {
                 px[i] = 0; px[i + 1] = 0; px[i + 2] = 0; px[i + 3] = 0
             }
         }

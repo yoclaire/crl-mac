@@ -18,7 +18,7 @@ cd "$(dirname "$0")/.."
 
 # The release that carries the decoded library (CRL-library-*.zip); bump it, and scripts/library.sha256,
 # only when a decoder change produces a new library. App-only releases don't need to re-upload it.
-LIBRARY_RELEASE="v0.3"
+LIBRARY_RELEASE="v0.5"
 LIB=""; ISO=""; EMBED=1; DOWNLOAD=0
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -81,11 +81,19 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleIdentifier</key><string>com.clairemara.crl-mac</string>
   <key>CFBundleExecutable</key><string>CRLApp</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.4</string>
-  <key>CFBundleVersion</key><string>4</string>
+  <key>CFBundleShortVersionString</key><string>0.5</string>
+  <key>CFBundleVersion</key><string>5</string>
   <key>LSMinimumSystemVersion</key><string>15.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>LSApplicationCategoryType</key><string>public.app-category.reference</string>
+  <key>NSAccessibilityUsageDescription</key><string>The CRL Quick Bar reads the text you have selected in another app so it can look it up.</string>
+  <key>NSServices</key><array><dict>
+    <key>NSMenuItem</key><dict><key>default</key><string>Search in Complete Reference Library</string></dict>
+    <key>NSMessage</key><string>searchSelection</string>
+    <key>NSPortName</key><string>Complete Reference Library</string>
+    <key>NSSendTypes</key><array><string>public.utf8-plain-text</string></array>
+    <key>NSRequiredContext</key><dict/>
+  </dict></array>
 </dict></plist>
 PLIST
 codesign --force --sign - "$APP" >/dev/null

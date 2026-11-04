@@ -56,7 +56,17 @@ swift build -c release
 .build/release/crltool search ./library hubble telescope
 .build/release/crltool entry  "…iso" dictionary 25213
 .build/release/crltool selftest
+.build/release/crltool ui "…iso" ./library     # refresh only the artwork, sounds and font
 ```
+
+## CRL Quick Bar
+
+Room menu → CRL Quick Bar, or System Configuration → Quick Reference to open it at start-up. It
+floats above other apps. Select a word anywhere, click the magnifier, and the library comes forward
+with the matches in the Index; the lettered buttons open and close books for searching. Reading
+another app's selection needs Accessibility access (System Settings → Privacy & Security →
+Accessibility); without it the bar searches whatever is on the clipboard. The Services menu item
+"Search in Complete Reference Library" does the same for a selection without any permission.
 
 ## Layout
 

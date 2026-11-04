@@ -189,6 +189,30 @@ runs carry ©/®/™ as 0xD3/0xE2/0xD4. 16 topics, 12 jumps — every jump's tex
 - Panel geometry (Subject List, article pane, media combo) was measured from a screenshot of the
   original running; it is not in the resources.
 
+## CRL Quick Bar (`CRLBAR32.EXE`)
+
+An MFC 3 floating toolbar, separate from CRL32, that looks up the selection in another program.
+
+- Bitmap 106: 192×15, 4 bpp, twelve 16×15 glyphs: magnifier, E D T A N L W H S Q, Exit. (Bitmap 103
+  is a 7-glyph strip with E D T A H only, apparently for a smaller edition.) Button-face grey
+  (192,192,192) is the background; the library stores it keyed out as `ui/quickbar.png`.
+- Layout, from the tooltip hit test at `0x40412b`: 3 columns × 4 rows of 22 × 21 cells. Tooltips are
+  "Search/Open Reference", "Open …" / "Close …" with the book's name, and "Exit".
+- Command IDs 0x259 (search), 0x25A–0x263 (books, mapped by `0x401a17` to book codes
+  4 0 1 2 8 9 6 7 5 3), 0x264 (Exit, `ExitProcess`).
+- A book button toggles it. If CRL32's window ("Complete Reference Library for Windows") exists it
+  sends message 0x4C9 (wParam 1 = open, 2 = close; lParam = book code); otherwise it writes the
+  10-digit mask to `CRL32.INI [Configuration] OpenReferences`. At start-up 0x4C9 with wParam 0 asks
+  CRL32 for the open-book bitmask.
+- Search (`0x401b37`): opens and empties the clipboard, `SetForegroundWindow` on the window that was
+  active before the bar, sends Ctrl+C with `keybd_event` (`0x402345`), waits up to 6 s for the
+  clipboard owner to change, then `ShellExecute`s `CRL32.EXE Search`, waits for its window, and sends
+  0x4CA (1, first open book code).
+
+The macOS bar keeps the look, layout, tooltips and book toggling. Its panel never takes focus, so the
+app you were using is still in front: the selection is read with Accessibility (`AXSelectedText`),
+falling back to a ⌘C keystroke and the clipboard, which is put back afterwards.
+
 ## Media Library names and groupings (derived)
 
 Only photos have authored captions (MEDIA.UTL) and categories (MEDIA.CTG). For everything else the

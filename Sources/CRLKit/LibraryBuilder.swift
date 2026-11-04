@@ -8,7 +8,8 @@ import Foundation
 ///     media/video/*.mp4   Indeo 3 AVIs/ANIs transcoded with ffmpeg (if available)
 ///     media/music/*        the MUSIC folder's clips: despite the .MID names they are RIFF WAVE
 ///                          (MS-ADPCM) recordings, stored under the extension matching their content
-///     ui/*.png            CRL32.EXE bitmap resources (room artwork), magenta keyed to alpha
+///     ui/*.png            CRL32.EXE bitmap resources (room artwork), magenta keyed to alpha;
+///                         ui/quickbar.png is CRLBAR32.EXE's toolbar strip
 ///     fonts/CRL_1.TTF     pronunciation font from the disc
 public final class LibraryBuilder {
     public let iso: ISO9660
@@ -350,7 +351,8 @@ public final class LibraryBuilder {
 
     // MARK: UI artwork
 
-    func buildUI() throws {
+    /// Room artwork, sounds and the font. Public so `crltool ui` can refresh them in an existing library.
+    public func buildUI() throws {
         progress("Unpacking the reading room", 0.96)
         let ui = try dir("ui")
         let exe = try iso.contents("CRL/CRL32.EXE")
@@ -358,6 +360,12 @@ public final class LibraryBuilder {
             guard let name = Self.safeName(r.id.map(String.init) ?? r.name ?? "") else { continue }
             let opaque = [271, 272, 308, 436, 437, 477, 478, 479, 480, 481].contains(r.id ?? -1)
             try PEResources.png(fromDIB: r.data, keyMagenta: !opaque).write(to: ui.appendingPathComponent("\(name).png"))
+        }
+        // CRLBAR32.EXE (the CRL Quick Bar) bitmap 106: its toolbar strip of twelve 16×15 glyphs (magnifier,
+        // E D T A N L W H S Q, Exit). Button-face grey is keyed out so the button state shows through.
+        if let bar = try? iso.contents("CRL/CRLBAR32.EXE"),
+           let strip = try PEResources.resources(bar).first(where: { $0.type == 2 && $0.id == 106 }) {
+            try PEResources.png(fromDIB: strip.data, key: (192, 192, 192)).write(to: ui.appendingPathComponent("quickbar.png"))
         }
         let sounds = try dir("ui/sounds")
         for f in try iso.files(in: "CRL") where f.name.hasSuffix(".WAV") {

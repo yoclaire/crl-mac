@@ -81,6 +81,8 @@ final class AppModel: ObservableObject {
     @Published var expandPictures = AppModel.flag("ExpandPictures", false) { didSet { AppModel.defaults.set(expandPictures, forKey: "ExpandPictures") } }
     @Published var expandMaps = AppModel.flag("ExpandMaps", false) { didSet { AppModel.defaults.set(expandMaps, forKey: "ExpandMaps") } }
     @Published var passOverHelp = AppModel.flag("PassOverHelp", true) { didSet { AppModel.defaults.set(passOverHelp, forKey: "PassOverHelp") } }
+    /// "Quick Reference: Run on start up?" — open the CRL Quick Bar at launch (CRL32 value StartQuickRef).
+    @Published var startQuickRef = AppModel.flag("StartQuickRef", false) { didSet { AppModel.defaults.set(startQuickRef, forKey: "StartQuickRef") } }
     @Published var buttonSounds = AppModel.defaults.object(forKey: "ButtonSounds") as? Bool ?? AppModel.flag("EnableSounds", true) {
         didSet { AppModel.defaults.set(buttonSounds, forKey: "ButtonSounds") }
     }
@@ -437,8 +439,8 @@ final class AppModel: ObservableObject {
     }
 
     /// Search the open books. Typing searches as you go when "Indexing while typing" is on;
-    /// Return (`submit`) always searches, opens the first hit, or reports the failure.
-    func search(submit: Bool = false) {
+    /// Return (`submit`) always searches, opens the first hit (unless `openFirst` is off), or reports the failure.
+    func search(submit: Bool = false, openFirst: Bool = true) {
         // A submitted search (Return, a Spell Check pick) also changes `query`, and the Index's onChange
         // then asks for a live search of the same text; don't let that cancel the submitted one.
         if !submit, query == pendingSubmit { return }
@@ -458,9 +460,29 @@ final class AppModel: ObservableObject {
             hits = r
             if submit { pendingSubmit = nil }
             if submit {
-                if let h = r.first { show(h) } else if !q.trimmingCharacters(in: .whitespaces).isEmpty { searchFailed = true; sound("abort.wav") }
+                if let h = r.first { if openFirst { show(h) } } else if !q.trimmingCharacters(in: .whitespaces).isEmpty { searchFailed = true; sound("abort.wav") }
             }
         }
+    }
+
+    /// The Quick Bar's magnifier (and the Services menu item): bring the library forward and search the open
+    /// books for the text, with the configured search type, listing the hits in the Index. With no text it
+    /// just brings the library forward ("Search/Open Reference").
+    func quickBarSearch(_ text: String?) {
+        NSApp.activate()
+        if let w = NSApp.windows.first(where: { !($0 is NSPanel) && $0.canBecomeMain }) {
+            if w.isMiniaturized { w.deminiaturize(nil) }
+            w.makeKeyAndOrderFront(nil)
+        }
+        guard library != nil else { return }
+        if screen == .mediaLibrary { screen = .room }
+        let line = (text ?? "").split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+        let q = String(line.trimmingCharacters(in: .whitespaces).prefix(80))
+        panel = .index
+        guard !q.isEmpty else { return }
+        query = q
+        fullText = searchTypeDefault == "full"
+        search(submit: true, openFirst: false)
     }
 
     /// Search failure → "Spell Check": list dictionary words close to the query.

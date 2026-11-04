@@ -20,6 +20,11 @@ enum Snapshot {
                 if f.count > 1 { model.selectMediaType(f[1]) }
                 if f.count > 2 { model.selectMediaCategory(f[2]) }
                 if f.count > 3, let i = Int(f[3]), i < model.mediaItems.count { model.selectMediaItem(model.mediaItems[i]); model.player.stop() }
+            case "quickbar":
+                // quickbar[:book,book…] — open the Quick Bar with exactly these books open
+                if parts.count > 1 { model.openBooks = Set(parts[1].split(separator: ",").map(String.init)) }
+                QuickBar.shared.show()
+            case "lookup": model.quickBarSearch(parts.count > 1 ? parts[1] : nil)   // the Quick Bar magnifier's search
             case "hover": model.hover = parts.count > 1 ? parts[1] : nil
             case "help": model.panel = .help; if parts.count > 1 { model.showHelp(parts[1]) }
             case "toc":
@@ -51,7 +56,8 @@ enum Snapshot {
             }
             if let o = env["CRL_OVERLAY"] { model.present(model.media([o])) }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                guard let view = NSApp.windows.first(where: { $0.isVisible })?.contentView,
+                let window = parts.first == "quickbar" ? QuickBar.shared.panel : NSApp.windows.first(where: { $0.isVisible && !($0 is NSPanel) })
+                guard let view = window?.contentView,
                       let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { exit(1) }
                 view.cacheDisplay(in: view.bounds, to: rep)
                 try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: out))

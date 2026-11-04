@@ -5,10 +5,11 @@ import Foundation
 //   crltool import <disc.iso> <library-dir>
 //   crltool entry <disc.iso> <book-id> <n>
 //   crltool search <library-dir> <query>
+//   crltool ui <disc.iso> <library-dir>      refresh only the artwork, sounds and font
 
 let args = CommandLine.arguments
 func usage() -> Never {
-    print("usage: crltool import <disc.iso> <library-dir> | entry <disc.iso> <book> <n> | search <library-dir> <query> | help <disc.iso> | suggest <library-dir> <word>")
+    print("usage: crltool import <disc.iso> <library-dir> | entry <disc.iso> <book> <n> | search <library-dir> <query> | help <disc.iso> | suggest <library-dir> <word> | ui <disc.iso> <library-dir>")
     exit(2)
 }
 guard args.count >= 2 else { usage() }
@@ -25,6 +26,9 @@ do {
         let t = Date()
         try b.build()
         print(String(format: "built in %.1fs", Date().timeIntervalSince(t)))
+    case "ui" where args.count == 4:
+        guard Library.isBuilt(URL(fileURLWithPath: args[3])) else { print("no library at \(args[3])"); exit(1) }
+        try LibraryBuilder(isoURL: URL(fileURLWithPath: args[2]), output: URL(fileURLWithPath: args[3])).buildUI()
     case "entry" where args.count == 5:
         let iso = try ISO9660(url: URL(fileURLWithPath: args[2]))
         guard let book = Book.all.first(where: { $0.id == args[3] }), let n = Int(args[4]) else { usage() }

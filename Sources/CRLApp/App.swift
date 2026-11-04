@@ -49,6 +49,8 @@ struct CRLMacApp: App {
                 Button("Go to Bookmark…") { model.bookmarkMenu() }.keyboardShortcut("g")
                 Button("Delete Bookmark…") { model.bookmarkMenu() }.keyboardShortcut("d")
                 Divider()
+                Button("CRL Quick Bar") { QuickBar.shared.toggle() }
+                Divider()
                 Button("Text and Video Help") { model.activate("help") }.keyboardShortcut("?")
             }
         }
@@ -68,6 +70,11 @@ struct CRLMacApp: App {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    let services = ServiceProvider()
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.servicesProvider = services
+        NSUpdateDynamicServices()
+    }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 }
 
@@ -98,7 +105,12 @@ struct RootView: View {
         .frame(minWidth: 640, minHeight: 480)
         .ignoresSafeArea()
         .background(WindowConfigurator(active: $model.windowActive))
-        .onAppear { Art.directory = AppModel.libraryURL; Snapshot.runIfRequested(model) }
+        .onAppear {
+            Art.directory = AppModel.libraryURL
+            QuickBar.shared.model = model
+            if model.startQuickRef && ProcessInfo.processInfo.environment["CRL_SNAPSHOT"] == nil { QuickBar.shared.show() }
+            Snapshot.runIfRequested(model)
+        }
     }
 }
 
@@ -119,6 +131,10 @@ struct WindowConfigurator: NSViewRepresentable {
             }
             NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: w, queue: .main) { _ in
                 MainActor.assumeIsolated { active = false }
+            }
+            // The Quick Bar belongs to this window: closing the library closes it too (and so quits).
+            NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { _ in
+                MainActor.assumeIsolated { QuickBar.shared.close() }
             }
         }
         return v
@@ -167,7 +183,7 @@ struct WelcomeView: View {
 }
 
 /// CRL32's "System Configuration" dialog (resource 438), opened from the computer on the desk.
-/// The CD-ROM drive and Quick Reference startup settings have no meaning here and are left out.
+/// The CD-ROM drive setting has no meaning here and is left out.
 struct ConfigurationView: View {
     @EnvironmentObject var model: AppModel
     var body: some View {
@@ -188,6 +204,10 @@ struct ConfigurationView: View {
             Section("Expand to Full View") {
                 Toggle("Pictures and Images", isOn: $model.expandPictures)
                 Toggle("Maps", isOn: $model.expandMaps)
+            }
+            Section("Quick Reference") {
+                Toggle("Open the CRL Quick Bar on start up", isOn: $model.startQuickRef)
+                Button("Open the CRL Quick Bar") { QuickBar.shared.show() }
             }
             Section("Help Options") {
                 Toggle("Pass-Over Help", isOn: $model.passOverHelp)
