@@ -18,7 +18,7 @@ cd "$(dirname "$0")/.."
 
 # The release that carries the decoded library (CRL-library-*.zip); bump it, and scripts/library.sha256,
 # only when a decoder change produces a new library. App-only releases don't need to re-upload it.
-LIBRARY_RELEASE="v0.5"
+LIBRARY_RELEASE="v1.1"
 LIB=""; ISO=""; EMBED=1; DOWNLOAD=0
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -70,7 +70,16 @@ cp "$BIN/CRLApp" "$APP/Contents/MacOS/CRLApp"
 cp -R "$BIN/CRLMac_CRLApp.bundle" "$APP/Contents/Resources/"
 if [ "$EMBED" = 1 ]; then
   # -c makes APFS clones, so embedding ~1 GB costs almost no extra disk space.
-  cp -cR "$LIB" "$APP/Contents/Resources/library" 2>/dev/null || cp -R "$LIB" "$APP/Contents/Resources/library"
+  # (/bin/cp: a GNU cp earlier on PATH has no -c and would fall back to a full copy.)
+  /bin/cp -cR "$LIB" "$APP/Contents/Resources/library" 2>/dev/null || cp -R "$LIB" "$APP/Contents/Resources/library"
+fi
+# The app icon, made from CRL32's own icon in the library (libraries from before v1.1 don't have it).
+if [ -f "$LIB/ui/icon-32.png" ]; then
+  ICONSET="$(mktemp -d)/AppIcon.iconset"
+  "$BIN/crltool" iconset "$LIB" "$ICONSET" && iconutil -c icns -o "$APP/Contents/Resources/AppIcon.icns" "$ICONSET"
+  rm -rf "$(dirname "$ICONSET")"
+else
+  echo "note: this library has no ui/icon-32.png, so the app gets no icon (refresh it with crltool ui)"
 fi
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -80,9 +89,10 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleDisplayName</key><string>Complete Reference Library</string>
   <key>CFBundleIdentifier</key><string>com.clairemara.crl-mac</string>
   <key>CFBundleExecutable</key><string>CRLApp</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.0</string>
-  <key>CFBundleVersion</key><string>6</string>
+  <key>CFBundleShortVersionString</key><string>1.1</string>
+  <key>CFBundleVersion</key><string>7</string>
   <key>LSMinimumSystemVersion</key><string>15.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>LSApplicationCategoryType</key><string>public.app-category.reference</string>

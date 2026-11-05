@@ -188,6 +188,10 @@ runs carry ©/®/™ as 0xD3/0xE2/0xD4. 16 topics, 12 jumps — every jump's tex
   (D T A Q E S W H N L, then map, video, sound, music, picture, animation, search).
 - Panel geometry (Subject List, article pane, media combo) was measured from a screenshot of the
   original running; it is not in the resources.
+- Icon group 2 (RT_GROUP_ICON → RT_ICON 1 and 2): 32×32 and 16×16, 4 bpp, four books (green,
+  yellow, blue, red). Each RT_ICON is a DIB with doubled height: palette, colour bitmap, then a 1-bpp
+  AND mask whose set bits are transparent. The library keeps them as `ui/icon-32.png` and
+  `ui/icon-16.png`; `crltool iconset` puts the 32×32 books on a wood tile for the macOS app icon.
 
 ## CRL Quick Bar (`CRLBAR32.EXE`)
 

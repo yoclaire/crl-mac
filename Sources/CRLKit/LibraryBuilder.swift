@@ -9,7 +9,8 @@ import Foundation
 ///     media/music/*        the MUSIC folder's clips: despite the .MID names they are RIFF WAVE
 ///                          (MS-ADPCM) recordings, stored under the extension matching their content
 ///     ui/*.png            CRL32.EXE bitmap resources (room artwork), magenta keyed to alpha;
-///                         ui/quickbar.png is CRLBAR32.EXE's toolbar strip
+///                         ui/quickbar.png is CRLBAR32.EXE's toolbar strip, ui/icon-32.png and
+///                         ui/icon-16.png CRL32's own icon
 ///     fonts/CRL_1.TTF     pronunciation font from the disc
 public final class LibraryBuilder {
     public let iso: ISO9660
@@ -360,6 +361,10 @@ public final class LibraryBuilder {
             guard let name = Self.safeName(r.id.map(String.init) ?? r.name ?? "") else { continue }
             let opaque = [271, 272, 308, 436, 437, 477, 478, 479, 480, 481].contains(r.id ?? -1)
             try PEResources.png(fromDIB: r.data, keyMagenta: !opaque).write(to: ui.appendingPathComponent("\(name).png"))
+        }
+        // CRL32's own icon (four books), from which the build makes the app icon.
+        for (size, png) in PEResources.icons(try PEResources.resources(exe)) where [16, 32].contains(size) {
+            try png.write(to: ui.appendingPathComponent("icon-\(size).png"))
         }
         // CRLBAR32.EXE (the CRL Quick Bar) bitmap 106: its toolbar strip of twelve 16×15 glyphs (magnifier,
         // E D T A N L W H S Q, Exit). Button-face grey is keyed out so the button state shows through.

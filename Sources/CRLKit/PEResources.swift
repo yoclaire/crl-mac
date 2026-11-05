@@ -48,6 +48,63 @@ public enum PEResources {
         return out
     }
 
+    /// The images of an icon group (RT_GROUP_ICON → its RT_ICON entries) as PNGs keyed by pixel size.
+    /// An icon DIB is a BITMAPINFOHEADER with doubled height, a palette, the colour bitmap and then a
+    /// 1-bpp AND mask whose set bits are transparent. 1/4/8-bpp palette and 32-bpp images are read.
+    public static func icons(_ res: [Resource], group: Int? = nil) -> [Int: Data] {
+        guard let g = res.first(where: { $0.type == 14 && (group == nil || $0.id == group) })?.data, g.count >= 6 else { return [:] }
+        var out: [Int: Data] = [:]
+        for k in 0..<Int(g.le16(4)) where 6 + 14 * k + 14 <= g.count {
+            let id = Int(g.le16(6 + 14 * k + 12))
+            guard let dib = res.first(where: { $0.type == 3 && $0.id == id })?.data, let (w, px) = decodeIcon(dib) else { continue }
+            out[w] = pngData(width: w, height: w, rgba: px)
+        }
+        return out
+    }
+
+    static func decodeIcon(_ d: Data) -> (Int, [UInt8])? {
+        guard d.count >= 40 else { return nil }
+        let hs = Int(d.le32(0)), w = Int(d.le32(4)), h = Int(d.le32(8)) / 2, bpp = Int(d.le16(14))
+        guard w > 0, w <= 256, h == w, [1, 4, 8, 32].contains(bpp) else { return nil }
+        var colors = Int(d.le32(32)); if colors == 0 && bpp <= 8 { colors = 1 << bpp }
+        let pal = hs, xor = pal + 4 * colors, xorRow = (w * bpp + 31) / 32 * 4, andRow = (w + 31) / 32 * 4
+        let and = xor + xorRow * h
+        guard d.count >= and + andRow * h else { return nil }
+        var px = [UInt8](repeating: 0, count: w * h * 4)
+        for y in 0..<h {
+            let src = h - 1 - y                                   // DIB rows run bottom-up
+            for x in 0..<w {
+                let o = (y * w + x) * 4, r = xor + src * xorRow
+                if bpp == 32 {
+                    let p = r + x * 4
+                    px[o] = d[d.startIndex + p + 2]; px[o + 1] = d[d.startIndex + p + 1]; px[o + 2] = d[d.startIndex + p]; px[o + 3] = d[d.startIndex + p + 3]
+                    continue
+                }
+                let bit = x * bpp, byte = Int(d[d.startIndex + r + bit / 8])
+                let i = byte >> (8 - bpp - bit % 8) & (1 << bpp - 1), c = pal + 4 * i
+                let masked = Int(d[d.startIndex + and + src * andRow + x / 8]) >> (7 - x % 8) & 1 == 1
+                px[o] = d[d.startIndex + c + 2]; px[o + 1] = d[d.startIndex + c + 1]; px[o + 2] = d[d.startIndex + c]; px[o + 3] = masked ? 0 : 255
+                if masked { px[o] = 0; px[o + 1] = 0; px[o + 2] = 0 }
+            }
+        }
+        return (w, px)
+    }
+
+    /// PNG bytes for straight (unpremultiplied) RGBA pixels.
+    public static func pngData(width w: Int, height h: Int, rgba: [UInt8]) -> Data {
+        var px = rgba
+        for i in stride(from: 0, to: px.count, by: 4) where px[i + 3] < 255 {   // premultiply for CoreGraphics
+            let a = Int(px[i + 3]); px[i] = UInt8(Int(px[i]) * a / 255); px[i + 1] = UInt8(Int(px[i + 1]) * a / 255); px[i + 2] = UInt8(Int(px[i + 2]) * a / 255)
+        }
+        let img = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!.makeImage()!
+        let buf = NSMutableData()
+        let dst = CGImageDestinationCreateWithData(buf, UTType.png.identifier as CFString, 1, nil)!
+        CGImageDestinationAddImage(dst, img, nil)
+        CGImageDestinationFinalize(dst)
+        return buf as Data
+    }
+
     /// Turn an RT_BITMAP DIB into PNG bytes. Magenta (255,0,255) becomes transparent, as the
     /// original sprite blitter treats it; `key` names a different colour to drop instead.
     public static func png(fromDIB dib: Data, keyMagenta: Bool = true, key: (UInt8, UInt8, UInt8)? = nil) throws -> Data {

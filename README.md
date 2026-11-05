@@ -56,7 +56,8 @@ swift build -c release
 .build/release/crltool search ./library hubble telescope
 .build/release/crltool entry  "…iso" dictionary 25213
 .build/release/crltool selftest
-.build/release/crltool ui "…iso" ./library     # refresh only the artwork, sounds and font
+.build/release/crltool ui "…iso" ./library     # refresh only the artwork, sounds, font and icon
+.build/release/crltool iconset ./library AppIcon.iconset   # the app icon (make-app.sh does this)
 ```
 
 ## CRL Quick Bar
